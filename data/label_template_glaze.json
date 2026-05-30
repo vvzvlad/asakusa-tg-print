@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "widthMm": 58,
+  "heightMm": 40,
+  "zoom": 380,
+  "columnCount": 8,
+  "nodes": [
+    {
+      "type": "text",
+      "text": "%E1%",
+      "x": 56.76315820354495,
+      "y": 1.7368420996647558,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "fontSize": 20,
+      "fill": "#000000",
+      "width": 159.73684179645454,
+      "height": 69.28947370100575,
+      "align": "center",
+      "verticalAlign": "middle"
+    },
+    {
+      "type": "line",
+      "points": [
+        0,
+        0,
+        214.4394073187393,
+        0
+      ],
+      "x": 1.5825779019129813,
+      "y": 74.46185870267259,
+      "rotation": 0,
+      "scaleX": 1.0522815612822187,
+      "scaleY": 1.000000000000001,
+      "stroke": "#000000",
+      "strokeWidth": 2
+    },
+    {
+      "type": "image",
+      "isUrl": true,
+      "urlTemplate": "%E4%",
+      "src": null,
+      "x": 3.552631640708987,
+      "y": 0.9736841993294547,
+      "rotation": 0,
+      "scaleX": 0.6320779229539673,
+      "scaleY": 0.5637554090558257,
+      "width": 80,
+      "height": 80
+    },
+    {
+      "type": "text",
+      "text": "%E7%\n%E8%",
+      "x": 3.552631640708987,
+      "y": 99.10526309631204,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "fontSize": 13,
+      "fill": "#000000",
+      "width": 136.9999999999999,
+      "height": 51.28947380737598,
+      "align": "left",
+      "verticalAlign": "middle"
+    },
+    {
+      "type": "text",
+      "text": "%E2%",
+      "x": 3.552631640708987,
+      "y": 79.28947370100568,
+      "rotation": 0,
+      "scaleX": 1,
+      "scaleY": 1,
+      "fontSize": 21,
+      "fill": "#000000",
+      "width": 139.4999999999995,
+      "height": 18.368420783907148,
+      "align": "left",
+      "verticalAlign": "top"
+    },
+    {
+      "type": "image",
+      "isUrl": true,
+      "urlTemplate": "%E5%",
+      "src": null,
+      "x": 3.552631640708987,
+      "y": 48.18421049832367,
+      "rotation": 0,
+      "scaleX": 0.2871175540758013,
+      "scaleY": 0.287117554075801,
+      "width": 80,
+      "height": 80
+    },
+    {
+      "type": "image",
+      "isUrl": true,
+      "urlTemplate": "%E6%",
+      "src": null,
+      "x": 28.317773432787607,
+      "y": 48.14141226001161,
+      "rotation": 0,
+      "scaleX": 0.3225136505529845,
+      "scaleY": 0.2876525320547016,
+      "width": 80,
+      "height": 80
+    },
+    {
+      "type": "qr",
+      "x": 145.01858052571723,
+      "y": 78.12384047410349,
+      "rotation": 0,
+      "scaleX": 0.8948335821185145,
+      "scaleY": 0.8948335821185147,
+      "width": 80,
+      "height": 80,
+      "content": "%E3%"
+    }
+  ]
+}

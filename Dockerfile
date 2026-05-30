@@ -11,9 +11,10 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code and the label template
+# Copy source code and the label templates
 COPY src/ src/
 COPY data/label_template.json data/label_template.json
+COPY data/label_template_glaze.json data/label_template_glaze.json
 COPY main.py .
 
 # Run the bot

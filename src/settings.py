@@ -14,7 +14,15 @@ class Settings(BaseSettings):
     label_maker_url: str = "http://localhost:8000"
     label_maker_timeout: int = 60
     template_path: str = "data/label_template.json"
+    glaze_template_path: str = "data/label_template_glaze.json"
     labels_db_path: str = "data/labels.db"
+
+    # Grist (source for /printglaze) — configured via .env
+    grist_base_url: str = ""
+    grist_doc_id: str = ""
+    grist_api_key: str = ""
+    # Public glaze site base URL printed into the label (QR + icon links)
+    glaze_site_url: str = ""
     # Rotate the PDF page 90°. False = landscape 58×40mm (direct PDF print to CUPS).
     label_rotate: bool = False
 

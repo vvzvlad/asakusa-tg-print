@@ -15,6 +15,7 @@ from aiogram.types import (
 )
 from loguru import logger
 
+from src.grist import GristClient, GristError, glaze_entities
 from src.label_maker import LabelMaker, LabelMakerError
 from src.preview import pdf_to_png
 from src.printer import Printer, PrinterError
@@ -25,6 +26,7 @@ HELP_TEXT = """Asakusa Label Printer
 
 /print <текст> — отрендерить этикетку 58×40мм и показать превью перед печатью
 /print (реплаем) — напечатать текст сообщения, на которое отвечаешь
+/printglaze <название> — этикетка глазури по данным из Grist (поиск по GeneralName)
 /sudoprint <текст> — напечатать сразу, без подтверждения
 /start — эта справка
 
@@ -76,6 +78,8 @@ class PrintBot:
         self.dp = Dispatcher(storage=MemoryStorage())
 
         self.label_maker = LabelMaker()
+        self.glaze_maker = LabelMaker(settings.glaze_template_path)
+        self.grist = GristClient()
         self.printer = Printer()
 
         # Previews awaiting confirmation: token -> {"pdf", "text"} (transient, in-memory)
@@ -85,6 +89,7 @@ class PrintBot:
         router = Router()
         router.message.register(self._cmd_start, Command("start"))
         router.message.register(self._cmd_print, Command("print"))
+        router.message.register(self._cmd_printglaze, Command("printglaze"))
         router.message.register(self._cmd_sudoprint, Command("sudoprint"))
         router.callback_query.register(self._cb_print, F.data.startswith("print:"))
         router.callback_query.register(self._cb_cancel, F.data.startswith("cancel:"))
@@ -94,6 +99,7 @@ class PrintBot:
     async def start(self) -> None:
         await self.bot.set_my_commands([
             BotCommand(command="print", description="Напечатать этикетку (с подтверждением)"),
+            BotCommand(command="printglaze", description="Этикетка глазури из Grist (с подтверждением)"),
             BotCommand(command="sudoprint", description="Напечатать сразу, без подтверждения"),
             BotCommand(command="start", description="Справка"),
         ])
@@ -110,6 +116,11 @@ class PrintBot:
 
     async def _render(self, text: str) -> tuple[bytes, bytes]:
         pdf = await self.label_maker.render(text)
+        png = await pdf_to_png(pdf)
+        return pdf, png
+
+    async def _render_glaze(self, fields: dict) -> tuple[bytes, bytes]:
+        pdf = await self.glaze_maker.render_entities(glaze_entities(fields))
         png = await pdf_to_png(pdf)
         return pdf, png
 
@@ -160,7 +171,7 @@ class PrintBot:
             token = next(self._tokens)
             if len(self._pending) >= MAX_PENDING:
                 self._pending.pop(next(iter(self._pending)))
-            self._pending[token] = {"pdf": pdf, "text": text}
+            self._pending[token] = {"pdf": pdf, "text": text, "kind": "text"}
             await status.delete()
             await message.answer_photo(
                 BufferedInputFile(png, filename="label.png"),
@@ -169,6 +180,55 @@ class PrintBot:
             )
         except Exception as e:
             logger.warning("Error in /print: {}", e)
+            await message.answer("Произошла ошибка.")
+
+    async def _cmd_printglaze(self, message: Message, command: CommandObject) -> None:
+        try:
+            if message.from_user is None:
+                return
+            if not self._authorized(message.from_user.id, message.chat.id):
+                logger.info("Denied /printglaze: user={} chat={}", message.from_user.id, message.chat.id)
+                await message.answer(
+                    f"⛔ Печать запрещена.\nuser_id: {message.from_user.id}\nchat_id: {message.chat.id}"
+                )
+                return
+
+            query = (command.args or "").strip() or _reply_text(message)
+            if not query:
+                await message.answer("Использование: /printglaze <название глазури>")
+                return
+
+            status = await message.answer("⏳ Ищу глазурь в Grist…")
+            try:
+                fields = await self.grist.find_glaze(query)
+            except GristError as e:
+                logger.warning("Grist lookup failed: {}", e)
+                await status.edit_text(f"❌ Ошибка Grist: {_short(str(e), 200)}")
+                return
+            if fields is None:
+                await status.edit_text(f"❌ Глазурь не найдена: «{_short(query, 100)}»")
+                return
+
+            name = (fields.get("GeneralName") or query).strip()
+            try:
+                pdf, png = await self._render_glaze(fields)
+            except LabelMakerError as e:
+                logger.warning("Render failed: {}", e)
+                await status.edit_text(f"❌ Не удалось сгенерировать этикетку: {e}")
+                return
+
+            token = next(self._tokens)
+            if len(self._pending) >= MAX_PENDING:
+                self._pending.pop(next(iter(self._pending)))
+            self._pending[token] = {"pdf": pdf, "text": name, "kind": "glaze"}
+            await status.delete()
+            await message.answer_photo(
+                BufferedInputFile(png, filename="label.png"),
+                caption=f"Глазурь:\n«{_short(name)}»\n\nПечатать?",
+                reply_markup=_confirm_keyboard(token),
+            )
+        except Exception as e:
+            logger.warning("Error in /printglaze: {}", e)
             await message.answer("Произошла ошибка.")
 
     async def _cmd_sudoprint(self, message: Message, command: CommandObject) -> None:
@@ -237,7 +297,9 @@ class PrintBot:
                 return
 
             chat_id = callback.message.chat.id if isinstance(callback.message, Message) else 0
-            label_id = await self.storage.add_label(job["text"], chat_id, callback.from_user.id)
+            label_id = await self.storage.add_label(
+                job["text"], chat_id, callback.from_user.id, job.get("kind", "text")
+            )
             suffix = f" (задание {request_id})" if request_id else ""
             await self._set_caption(
                 callback,
@@ -272,10 +334,17 @@ class PrintBot:
 
             await callback.answer("⏳ Перепечатываю…")
             text = label["text"]
+            kind = label.get("kind", "text")
             try:
-                pdf = await self.label_maker.render(text)
+                if kind == "glaze":
+                    fields = await self.grist.find_glaze(text)
+                    if fields is None:
+                        raise LabelMakerError(f"глазурь не найдена в Grist: «{text}»")
+                    pdf = await self.glaze_maker.render_entities(glaze_entities(fields))
+                else:
+                    pdf = await self.label_maker.render(text)
                 request_id = await self.printer.print_pdf(pdf)
-            except (LabelMakerError, PrinterError) as e:
+            except (LabelMakerError, PrinterError, GristError) as e:
                 logger.warning("Reprint failed: {}", e)
                 if callback.message:
                     await callback.message.answer(f"❌ Не удалось перепечатать «{_short(text)}»: {e}")

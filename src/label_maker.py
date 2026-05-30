@@ -18,11 +18,11 @@ class LabelMaker:
     into the %E1% placeholder via the `rows` entities, mirroring the web UI.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, template_path: str | None = None) -> None:
         self.base_url = settings.label_maker_url.rstrip("/")
         self.timeout = settings.label_maker_timeout
         self.rotate = settings.label_rotate
-        self.template = self._load_template(settings.template_path)
+        self.template = self._load_template(template_path or settings.template_path)
 
     @staticmethod
     def _load_template(path: str) -> dict:
@@ -37,9 +37,13 @@ class LabelMaker:
 
     async def render(self, text: str) -> bytes:
         """Render the template with `text` in %E1% and return PDF bytes."""
+        return await self.render_entities([text])
+
+    async def render_entities(self, entities: list[str]) -> bytes:
+        """Render the template, substituting entities positionally into %E1%, %E2%, …"""
         payload = {
             "template": self.template,
-            "rows": [{"entities": [text]}],
+            "rows": [{"entities": entities}],
             "rotate": self.rotate,
         }
         url = f"{self.base_url}/api/generate-pdf"

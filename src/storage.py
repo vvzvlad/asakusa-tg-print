@@ -27,17 +27,28 @@ class Storage:
                 text       TEXT    NOT NULL,
                 chat_id    INTEGER,
                 user_id    INTEGER,
+                kind       TEXT    NOT NULL DEFAULT 'text',
                 created_at INTEGER NOT NULL
             )
             """
         )
+        # Migrate older DBs created before the `kind` column existed.
+        cur = await self.db.execute("PRAGMA table_info(labels)")
+        columns = {row["name"] for row in await cur.fetchall()}
+        if "kind" not in columns:
+            await self.db.execute(
+                "ALTER TABLE labels ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'"
+            )
         await self.db.commit()
         logger.info("Label store ready at {}", self.path)
 
-    async def add_label(self, text: str, chat_id: int, user_id: int) -> int:
+    async def add_label(
+        self, text: str, chat_id: int, user_id: int, kind: str = "text"
+    ) -> int:
         cur = await self.db.execute(
-            "INSERT INTO labels (text, chat_id, user_id, created_at) VALUES (?, ?, ?, ?)",
-            (text, chat_id, user_id, int(time.time())),
+            "INSERT INTO labels (text, chat_id, user_id, kind, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (text, chat_id, user_id, kind, int(time.time())),
         )
         await self.db.commit()
         if cur.lastrowid is None:
