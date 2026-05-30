@@ -7,11 +7,14 @@ class Settings(BaseSettings):
     telegram_api_server: str | None = None
     # Comma-separated Telegram user IDs allowed to print; empty = nobody (deny all)
     allowed_user_ids: str = ""
+    # Comma-separated Telegram chat IDs (groups) where everyone may print
+    allowed_chat_ids: str = ""
 
     # Label Maker HTTP service (POST /api/generate-pdf)
     label_maker_url: str = "http://localhost:8000"
     label_maker_timeout: int = 60
     template_path: str = "data/label_template.json"
+    labels_db_path: str = "data/labels.db"
     # Rotate the PDF page 90°. False = landscape 58×40mm (direct PDF print to CUPS).
     label_rotate: bool = False
 
@@ -25,14 +28,17 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    @staticmethod
+    def _parse_ids(raw: str) -> set[int]:
+        return {int(p.strip()) for p in raw.split(",") if p.strip()}
+
     @property
     def allowed_ids(self) -> set[int]:
-        ids = set()
-        for part in self.allowed_user_ids.split(","):
-            part = part.strip()
-            if part:
-                ids.add(int(part))
-        return ids
+        return self._parse_ids(self.allowed_user_ids)
+
+    @property
+    def allowed_chats(self) -> set[int]:
+        return self._parse_ids(self.allowed_chat_ids)
 
 
 settings = Settings()

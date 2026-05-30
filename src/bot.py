@@ -19,25 +19,44 @@ from src.label_maker import LabelMaker, LabelMakerError
 from src.preview import pdf_to_png
 from src.printer import Printer, PrinterError
 from src.settings import settings
+from src.storage import Storage
 
 HELP_TEXT = """Asakusa Label Printer
 
-/print <text> — render a 58×40mm label and preview it before printing
-/start — show this help
+/print <текст> — отрендерить этикетку 58×40мм и показать превью перед печатью
+/print (реплаем) — напечатать текст сообщения, на которое отвечаешь
+/sudoprint <текст> — напечатать сразу, без подтверждения
+/start — эта справка
 
-After /print you get a preview with «Print» / «Cancel» buttons; nothing is
-sent to the printer until you confirm."""
+После /print приходит превью с кнопками «Печать» / «Отмена» — на принтер ничего
+не уйдёт, пока не подтвердишь. У каждой напечатанной этикетки есть кнопка
+«🔁 Перепечатать» — её можно нажать в любой момент, чтобы напечатать ещё раз."""
 
 
-def _confirm_keyboard(job_id: int) -> InlineKeyboardMarkup:
+def _confirm_keyboard(token: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🖨 Печать", callback_data=f"print:{job_id}"),
-        InlineKeyboardButton(text="✖ Отмена", callback_data=f"cancel:{job_id}"),
+        InlineKeyboardButton(text="🖨 Печать", callback_data=f"print:{token}"),
+        InlineKeyboardButton(text="✖ Отмена", callback_data=f"cancel:{token}"),
     ]])
 
 
+def _reprint_keyboard(label_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔁 Перепечатать", callback_data=f"reprint:{label_id}"),
+    ]])
+
+
+def _reply_text(message: Message) -> str:
+    reply = message.reply_to_message
+    if reply is None:
+        return ""
+    return (reply.text or reply.caption or "").strip()
+
+
 class PrintBot:
-    def __init__(self) -> None:
+    def __init__(self, storage: Storage) -> None:
+        self.storage = storage
+
         # Use a self-hosted Bot API server instead of api.telegram.org when set
         if settings.telegram_api_server:
             session = AiohttpSession(
@@ -51,39 +70,54 @@ class PrintBot:
         self.label_maker = LabelMaker()
         self.printer = Printer()
 
-        # Pending jobs awaiting confirmation: job_id -> {"pdf", "text", "user_id"}
-        self._jobs: dict[int, dict] = {}
-        self._job_ids = count(1)
+        # Previews awaiting confirmation: token -> {"pdf", "text"} (transient, in-memory)
+        self._pending: dict[int, dict] = {}
+        self._tokens = count(1)
 
         router = Router()
         router.message.register(self._cmd_start, Command("start"))
         router.message.register(self._cmd_print, Command("print"))
+        router.message.register(self._cmd_sudoprint, Command("sudoprint"))
         router.callback_query.register(self._cb_print, F.data.startswith("print:"))
         router.callback_query.register(self._cb_cancel, F.data.startswith("cancel:"))
+        router.callback_query.register(self._cb_reprint, F.data.startswith("reprint:"))
         self.dp.include_router(router)
 
     async def start(self) -> None:
         await self.bot.set_my_commands([
-            BotCommand(command="print", description="Print a text label"),
-            BotCommand(command="start", description="Show help"),
+            BotCommand(command="print", description="Напечатать этикетку (с подтверждением)"),
+            BotCommand(command="sudoprint", description="Напечатать сразу, без подтверждения"),
+            BotCommand(command="start", description="Справка"),
         ])
         logger.info("Starting polling")
         await self.dp.start_polling(self.bot)
 
-    def _authorized(self, user_id: int) -> bool:
-        return user_id in settings.allowed_ids
+    # ── auth ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _authorized(user_id: int, chat_id: int) -> bool:
+        return user_id in settings.allowed_ids or chat_id in settings.allowed_chats
+
+    # ── rendering ─────────────────────────────────────────────────
+
+    async def _render(self, text: str) -> tuple[bytes, bytes]:
+        pdf = await self.label_maker.render(text)
+        png = await pdf_to_png(pdf)
+        return pdf, png
+
+    # ── commands ──────────────────────────────────────────────────
 
     async def _cmd_start(self, message: Message) -> None:
         try:
             if message.from_user is None:
                 return
-            user_id = message.from_user.id
-            if self._authorized(user_id):
+            if self._authorized(message.from_user.id, message.chat.id):
                 await message.answer(HELP_TEXT)
             else:
                 await message.answer(
-                    f"{HELP_TEXT}\n\n⚠️ Ваш ID {user_id} не в списке разрешённых. "
-                    "Попросите администратора добавить его в ALLOWED_USER_IDS."
+                    f"{HELP_TEXT}\n\n⚠️ Печать недоступна.\n"
+                    f"user_id: {message.from_user.id}\nchat_id: {message.chat.id}\n"
+                    "Добавьте их в ALLOWED_USER_IDS / ALLOWED_CHAT_IDS."
                 )
         except Exception as e:
             logger.warning("Error in /start: {}", e)
@@ -92,52 +126,90 @@ class PrintBot:
         try:
             if message.from_user is None:
                 return
-            user_id = message.from_user.id
-            if not self._authorized(user_id):
-                logger.info("Denied /print for unauthorized user {}", user_id)
-                await message.answer(f"⛔ Печать запрещена. Ваш ID: {user_id}")
+            if not self._authorized(message.from_user.id, message.chat.id):
+                logger.info("Denied /print: user={} chat={}", message.from_user.id, message.chat.id)
+                await message.answer(
+                    f"⛔ Печать запрещена.\nuser_id: {message.from_user.id}\nchat_id: {message.chat.id}"
+                )
                 return
 
-            text = (command.args or "").strip()
+            text = (command.args or "").strip() or _reply_text(message)
             if not text:
-                await message.answer("Использование: /print <текст этикетки>")
+                await message.answer("Использование: /print <текст> или /print реплаем на сообщение")
                 return
 
             status = await message.answer("⏳ Генерирую этикетку…")
             try:
-                pdf = await self.label_maker.render(text)
-                png = await pdf_to_png(pdf)
+                pdf, png = await self._render(text)
             except LabelMakerError as e:
                 logger.warning("Render failed: {}", e)
                 await status.edit_text(f"❌ Не удалось сгенерировать этикетку: {e}")
                 return
 
-            job_id = next(self._job_ids)
-            self._jobs[job_id] = {"pdf": pdf, "text": text, "user_id": user_id}
-
+            token = next(self._tokens)
+            self._pending[token] = {"pdf": pdf, "text": text}
             await status.delete()
             await message.answer_photo(
                 BufferedInputFile(png, filename="label.png"),
-                caption=f'Этикетка:\n«{text}»\n\nПечатать?',
-                reply_markup=_confirm_keyboard(job_id),
+                caption=f"Этикетка:\n«{text}»\n\nПечатать?",
+                reply_markup=_confirm_keyboard(token),
             )
         except Exception as e:
             logger.warning("Error in /print: {}", e)
             await message.answer("Произошла ошибка.")
 
+    async def _cmd_sudoprint(self, message: Message, command: CommandObject) -> None:
+        try:
+            if message.from_user is None:
+                return
+            chat_id, user_id = message.chat.id, message.from_user.id
+            if not self._authorized(user_id, chat_id):
+                logger.info("Denied /sudoprint: user={} chat={}", user_id, chat_id)
+                await message.answer(f"⛔ Печать запрещена.\nuser_id: {user_id}\nchat_id: {chat_id}")
+                return
+
+            text = (command.args or "").strip() or _reply_text(message)
+            if not text:
+                await message.answer("Использование: /sudoprint <текст> или реплаем на сообщение")
+                return
+
+            status = await message.answer("⏳ Печатаю…")
+            try:
+                pdf, png = await self._render(text)
+                request_id = await self.printer.print_pdf(pdf)
+            except LabelMakerError as e:
+                logger.warning("Render failed: {}", e)
+                await status.edit_text(f"❌ Не удалось сгенерировать этикетку: {e}")
+                return
+            except PrinterError as e:
+                logger.warning("Print failed: {}", e)
+                await status.edit_text(f"❌ Ошибка печати: {e}")
+                return
+
+            label_id = await self.storage.add_label(text, chat_id, user_id)
+            await status.delete()
+            suffix = f" (задание {request_id})" if request_id else ""
+            await message.answer_photo(
+                BufferedInputFile(png, filename="label.png"),
+                caption=f"«{text}»\n\n✅ Отправлено на печать{suffix}",
+                reply_markup=_reprint_keyboard(label_id),
+            )
+        except Exception as e:
+            logger.warning("Error in /sudoprint: {}", e)
+            await message.answer("Произошла ошибка.")
+
+    # ── callbacks ─────────────────────────────────────────────────
+
     async def _cb_print(self, callback: CallbackQuery) -> None:
         try:
-            if callback.from_user is None:
-                await callback.answer()
+            if not self._cb_authorized(callback):
+                await callback.answer("Печать запрещена", show_alert=True)
                 return
-            job_id = int(callback.data.split(":", 1)[1])
-            job = self._jobs.get(job_id)
+            token = int(callback.data.split(":", 1)[1])
+            job = self._pending.pop(token, None)
             if job is None:
                 await callback.answer("Задание устарело, отправьте /print заново")
                 await self._clear_markup(callback)
-                return
-            if job["user_id"] != callback.from_user.id:
-                await callback.answer("Это не ваше задание")
                 return
 
             await callback.answer("Отправляю на принтер…")
@@ -145,39 +217,73 @@ class PrintBot:
                 request_id = await self.printer.print_pdf(job["pdf"])
             except PrinterError as e:
                 logger.warning("Print failed: {}", e)
-                await self._set_caption(callback, f'«{job["text"]}»\n\n❌ Ошибка печати: {e}')
+                await self._set_caption(callback, f"«{job['text']}»\n\n❌ Ошибка печати: {e}", None)
                 return
-            finally:
-                self._jobs.pop(job_id, None)
 
+            chat_id = callback.message.chat.id if callback.message else 0
+            label_id = await self.storage.add_label(job["text"], chat_id, callback.from_user.id)
             suffix = f" (задание {request_id})" if request_id else ""
-            await self._set_caption(callback, f'«{job["text"]}»\n\n✅ Отправлено на печать{suffix}')
+            await self._set_caption(
+                callback,
+                f"«{job['text']}»\n\n✅ Отправлено на печать{suffix}",
+                _reprint_keyboard(label_id),
+            )
         except Exception as e:
             logger.warning("Error in print callback: {}", e)
             await callback.answer("Ошибка")
 
     async def _cb_cancel(self, callback: CallbackQuery) -> None:
         try:
-            if callback.from_user is None:
-                await callback.answer()
-                return
-            job_id = int(callback.data.split(":", 1)[1])
-            job = self._jobs.get(job_id)
-            if job is not None and job["user_id"] != callback.from_user.id:
-                await callback.answer("Это не ваше задание")
-                return
-            self._jobs.pop(job_id, None)
+            token = int(callback.data.split(":", 1)[1])
+            job = self._pending.pop(token, None)
             text = job["text"] if job else ""
-            await self._set_caption(callback, f'«{text}»\n\n✖ Отменено')
+            await self._set_caption(callback, f"«{text}»\n\n✖ Отменено", None)
             await callback.answer()
         except Exception as e:
             logger.warning("Error in cancel callback: {}", e)
             await callback.answer("Ошибка")
 
+    async def _cb_reprint(self, callback: CallbackQuery) -> None:
+        try:
+            if not self._cb_authorized(callback):
+                await callback.answer("Печать запрещена", show_alert=True)
+                return
+            label_id = int(callback.data.split(":", 1)[1])
+            label = await self.storage.get_label(label_id)
+            if label is None:
+                await callback.answer("Этикетка не найдена", show_alert=True)
+                return
+
+            await callback.answer("⏳ Перепечатываю…")
+            text = label["text"]
+            try:
+                pdf = await self.label_maker.render(text)
+                request_id = await self.printer.print_pdf(pdf)
+            except (LabelMakerError, PrinterError) as e:
+                logger.warning("Reprint failed: {}", e)
+                if callback.message:
+                    await callback.message.answer(f"❌ Не удалось перепечатать «{text}»: {e}")
+                return
+
+            suffix = f" (задание {request_id})" if request_id else ""
+            if callback.message:
+                await callback.message.answer(f"🔁 «{text}» — отправлено на печать заново{suffix}")
+        except Exception as e:
+            logger.warning("Error in reprint callback: {}", e)
+            await callback.answer("Ошибка")
+
+    # ── helpers ───────────────────────────────────────────────────
+
+    def _cb_authorized(self, callback: CallbackQuery) -> bool:
+        if callback.from_user is None:
+            return False
+        chat_id = callback.message.chat.id if callback.message else callback.from_user.id
+        return self._authorized(callback.from_user.id, chat_id)
+
     @staticmethod
-    async def _set_caption(callback: CallbackQuery, caption: str) -> None:
+    async def _set_caption(callback: CallbackQuery, caption: str, markup) -> None:
         if callback.message is not None:
-            await callback.message.edit_caption(caption=caption, reply_markup=None)
+            await callback.message.edit_caption(caption=caption, reply_markup=markup)
 
     @staticmethod
     async def _clear_markup(callback: CallbackQuery) -> None:
