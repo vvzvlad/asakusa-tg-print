@@ -40,7 +40,9 @@ class Storage:
             (text, chat_id, user_id, int(time.time())),
         )
         await self.db.commit()
-        return cur.lastrowid
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT did not return a row id")
+        return int(cur.lastrowid)
 
     async def get_label(self, label_id: int) -> dict | None:
         cur = await self.db.execute("SELECT * FROM labels WHERE id = ?", (label_id,))

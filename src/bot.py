@@ -32,6 +32,9 @@ HELP_TEXT = """Asakusa Label Printer
 не уйдёт, пока не подтвердишь. У каждой напечатанной этикетки есть кнопка
 «🔁 Перепечатать» — её можно нажать в любой момент, чтобы напечатать ещё раз."""
 
+MAX_LABEL_CHARS = 500   # reject longer label text (won't fit 58×40mm and would overflow Telegram captions)
+MAX_PENDING = 50        # cap in-memory pending previews to bound memory
+
 
 def _confirm_keyboard(token: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -44,6 +47,11 @@ def _reprint_keyboard(label_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🔁 Перепечатать", callback_data=f"reprint:{label_id}"),
     ]])
+
+
+def _short(text: str, limit: int = 900) -> str:
+    """Truncate text echoed into Telegram captions/messages (caption limit is 1024)."""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _reply_text(message: Message) -> str:
@@ -137,6 +145,9 @@ class PrintBot:
             if not text:
                 await message.answer("Использование: /print <текст> или /print реплаем на сообщение")
                 return
+            if len(text) > MAX_LABEL_CHARS:
+                await message.answer(f"Текст слишком длинный (макс {MAX_LABEL_CHARS} символов).")
+                return
 
             status = await message.answer("⏳ Генерирую этикетку…")
             try:
@@ -147,11 +158,13 @@ class PrintBot:
                 return
 
             token = next(self._tokens)
+            if len(self._pending) >= MAX_PENDING:
+                self._pending.pop(next(iter(self._pending)))
             self._pending[token] = {"pdf": pdf, "text": text}
             await status.delete()
             await message.answer_photo(
                 BufferedInputFile(png, filename="label.png"),
-                caption=f"Этикетка:\n«{text}»\n\nПечатать?",
+                caption=f"Этикетка:\n«{_short(text)}»\n\nПечатать?",
                 reply_markup=_confirm_keyboard(token),
             )
         except Exception as e:
@@ -172,6 +185,9 @@ class PrintBot:
             if not text:
                 await message.answer("Использование: /sudoprint <текст> или реплаем на сообщение")
                 return
+            if len(text) > MAX_LABEL_CHARS:
+                await message.answer(f"Текст слишком длинный (макс {MAX_LABEL_CHARS} символов).")
+                return
 
             status = await message.answer("⏳ Печатаю…")
             try:
@@ -191,7 +207,7 @@ class PrintBot:
             suffix = f" (задание {request_id})" if request_id else ""
             await message.answer_photo(
                 BufferedInputFile(png, filename="label.png"),
-                caption=f"«{text}»\n\n✅ Отправлено на печать{suffix}",
+                caption=f"«{_short(text)}»\n\n✅ Отправлено на печать{suffix}",
                 reply_markup=_reprint_keyboard(label_id),
             )
         except Exception as e:
@@ -217,15 +233,15 @@ class PrintBot:
                 request_id = await self.printer.print_pdf(job["pdf"])
             except PrinterError as e:
                 logger.warning("Print failed: {}", e)
-                await self._set_caption(callback, f"«{job['text']}»\n\n❌ Ошибка печати: {e}", None)
+                await self._set_caption(callback, f"«{_short(job['text'])}»\n\n❌ Ошибка печати: {e}", None)
                 return
 
-            chat_id = callback.message.chat.id if callback.message else 0
+            chat_id = callback.message.chat.id if isinstance(callback.message, Message) else 0
             label_id = await self.storage.add_label(job["text"], chat_id, callback.from_user.id)
             suffix = f" (задание {request_id})" if request_id else ""
             await self._set_caption(
                 callback,
-                f"«{job['text']}»\n\n✅ Отправлено на печать{suffix}",
+                f"«{_short(job['text'])}»\n\n✅ Отправлено на печать{suffix}",
                 _reprint_keyboard(label_id),
             )
         except Exception as e:
@@ -237,7 +253,7 @@ class PrintBot:
             token = int(callback.data.split(":", 1)[1])
             job = self._pending.pop(token, None)
             text = job["text"] if job else ""
-            await self._set_caption(callback, f"«{text}»\n\n✖ Отменено", None)
+            await self._set_caption(callback, f"«{_short(text)}»\n\n✖ Отменено", None)
             await callback.answer()
         except Exception as e:
             logger.warning("Error in cancel callback: {}", e)
@@ -262,12 +278,12 @@ class PrintBot:
             except (LabelMakerError, PrinterError) as e:
                 logger.warning("Reprint failed: {}", e)
                 if callback.message:
-                    await callback.message.answer(f"❌ Не удалось перепечатать «{text}»: {e}")
+                    await callback.message.answer(f"❌ Не удалось перепечатать «{_short(text)}»: {e}")
                 return
 
             suffix = f" (задание {request_id})" if request_id else ""
             if callback.message:
-                await callback.message.answer(f"🔁 «{text}» — отправлено на печать заново{suffix}")
+                await callback.message.answer(f"🔁 «{_short(text)}» — отправлено на печать заново{suffix}")
         except Exception as e:
             logger.warning("Error in reprint callback: {}", e)
             await callback.answer("Ошибка")
@@ -277,15 +293,19 @@ class PrintBot:
     def _cb_authorized(self, callback: CallbackQuery) -> bool:
         if callback.from_user is None:
             return False
-        chat_id = callback.message.chat.id if callback.message else callback.from_user.id
-        return self._authorized(callback.from_user.id, chat_id)
+        msg = callback.message
+        if isinstance(msg, Message):
+            return self._authorized(callback.from_user.id, msg.chat.id)
+        # Message is inaccessible (>48h): chat context is unavailable, so fall back
+        # to the per-user allowlist only.
+        return callback.from_user.id in settings.allowed_ids
 
     @staticmethod
     async def _set_caption(callback: CallbackQuery, caption: str, markup) -> None:
-        if callback.message is not None:
+        if isinstance(callback.message, Message):
             await callback.message.edit_caption(caption=caption, reply_markup=markup)
 
     @staticmethod
     async def _clear_markup(callback: CallbackQuery) -> None:
-        if callback.message is not None:
+        if isinstance(callback.message, Message):
             await callback.message.edit_reply_markup(reply_markup=None)
