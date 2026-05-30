@@ -233,7 +233,7 @@ class PrintBot:
                 request_id = await self.printer.print_pdf(job["pdf"])
             except PrinterError as e:
                 logger.warning("Print failed: {}", e)
-                await self._set_caption(callback, f"«{_short(job['text'])}»\n\n❌ Ошибка печати: {e}", None)
+                await self._set_caption(callback, f"«{_short(job['text'])}»\n\n❌ Ошибка печати: {_short(str(e), 200)}", None)
                 return
 
             chat_id = callback.message.chat.id if isinstance(callback.message, Message) else 0
