@@ -1,6 +1,8 @@
 from itertools import count
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
@@ -36,10 +38,14 @@ def _confirm_keyboard(job_id: int) -> InlineKeyboardMarkup:
 
 class PrintBot:
     def __init__(self) -> None:
-        bot_kwargs = {"token": settings.telegram_bot_token}
+        # Use a self-hosted Bot API server instead of api.telegram.org when set
         if settings.telegram_api_server:
-            bot_kwargs["base_url"] = settings.telegram_api_server
-        self.bot = Bot(**bot_kwargs)
+            session = AiohttpSession(
+                api=TelegramAPIServer.from_base(settings.telegram_api_server)
+            )
+            self.bot = Bot(token=settings.telegram_bot_token, session=session)
+        else:
+            self.bot = Bot(token=settings.telegram_bot_token)
         self.dp = Dispatcher(storage=MemoryStorage())
 
         self.label_maker = LabelMaker()
