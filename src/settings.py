@@ -13,8 +13,6 @@ class Settings(BaseSettings):
     # Label Maker HTTP service (POST /api/generate-pdf)
     label_maker_url: str = "http://localhost:8000"
     label_maker_timeout: int = 60
-    template_path: str = "data/label_template.json"
-    glaze_template_path: str = "data/label_template_glaze.json"
     labels_db_path: str = "data/labels.db"
 
     # Grist (source for /printglaze) — configured via .env

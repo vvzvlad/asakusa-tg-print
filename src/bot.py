@@ -16,7 +16,7 @@ from aiogram.types import (
 from loguru import logger
 
 from src.grist import GristClient, GristError, glaze_entities
-from src.label_maker import LabelMaker, LabelMakerError
+from src.label_maker import GLAZE_TEMPLATE_PATH, LabelMaker, LabelMakerError
 from src.preview import pdf_to_png
 from src.printer import Printer, PrinterError
 from src.settings import settings
@@ -78,7 +78,8 @@ class PrintBot:
         self.dp = Dispatcher(storage=MemoryStorage())
 
         self.label_maker = LabelMaker()
-        self.glaze_maker = LabelMaker(settings.glaze_template_path)
+        # Lazy: the glaze template is optional, don't crash startup if it's absent
+        self.glaze_maker = LabelMaker(GLAZE_TEMPLATE_PATH, lazy=True)
         self.grist = GristClient()
         self.printer = Printer()
 
