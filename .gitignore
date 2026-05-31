@@ -13,3 +13,9 @@ src/__pycache__/
 .DS_Store
 logs/
 data/*.db
+
+# test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
