@@ -73,11 +73,12 @@ def test_printer_fit_to_page_zero_coerced_to_false(monkeypatch):
     assert s.printer_fit_to_page is False
 
 
-def test_label_maker_url_uses_default_when_unset(monkeypatch):
-    # Ensure the optional var is genuinely absent so the model default applies.
+def test_missing_required_label_maker_url_raises(monkeypatch):
+    # label_maker_url is an own-service address with no default — unset must fail
+    # validation (a silent localhost fallback would mask misconfiguration on prod).
     monkeypatch.delenv("LABEL_MAKER_URL", raising=False)
-    s = Settings(_env_file=None)
-    assert s.label_maker_url == "http://localhost:8000"
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
 
 
 def test_default_label_rotate_is_false_when_unset(monkeypatch):
@@ -100,7 +101,7 @@ def test_allowed_user_ids_defaults_to_empty_string(monkeypatch):
     assert s.allowed_user_ids == ""
 
 
-def test_env_var_overrides_default(monkeypatch):
+def test_label_maker_url_read_from_env(monkeypatch):
     monkeypatch.setenv("LABEL_MAKER_URL", "http://printer.local:9000")
     s = Settings(_env_file=None)
     assert s.label_maker_url == "http://printer.local:9000"

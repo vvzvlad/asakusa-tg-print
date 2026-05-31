@@ -1,0 +1,47 @@
+# Deploy template — production pulls the prebuilt image from ghcr.io; watchtower
+# auto-updates it on every new :latest pushed by CI. Values below are PLACEHOLDERS
+# (XXX) — real secrets live only in the server's environment, never in the repo.
+#
+# This is a long-polling Telegram bot (no inbound port, so no Traefik/healthcheck),
+# but it joins the shared network to reach its siblings: the label_maker service
+# and the CUPS print host.
+
+volumes:
+  asakusa_tg_print:
+
+networks:
+  docker_main_net:
+    external: true
+
+services:
+  asakusa-tg-print:
+    image: ghcr.io/vvzvlad/asakusa-tg-print:latest
+    container_name: asakusa-tg-print
+    restart: always
+    volumes:
+      - asakusa_tg_print:/app/data        # SQLite label store survives restarts/updates
+    environment:
+      TELEGRAM_BOT_TOKEN: XXX
+      # TELEGRAM_API_SERVER: http://telegram-bot-api:8081   # optional self-hosted Bot API
+      ALLOWED_USER_IDS: XXX               # comma-separated user IDs (empty = nobody)
+      ALLOWED_CHAT_IDS: XXX               # comma-separated chat IDs (negative)
+      LABEL_MAKER_URL: http://label-maker:8000   # sibling service on docker_main_net
+      CUPS_HOST: XXX                      # CUPS print server host/IP
+      PRINTER_NAME: XP-365B
+      PRINTER_MEDIA: Custom.165x114pt
+      GRIST_BASE_URL: XXX
+      GRIST_DOC_ID: XXX
+      GRIST_API_KEY: XXX
+      GLAZE_SITE_URL: XXX
+      LABEL_ROTATE: "false"
+      LOG_LEVEL: INFO
+      TZ: Europe/Moscow
+    networks:
+      - docker_main_net
+    logging:
+      driver: "json-file"
+      options:
+        max-file: 5
+        max-size: 10m
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"

@@ -39,7 +39,16 @@ Stub conventions
 import os
 
 # --- must run before importing anything under src/ ---------------------------
+# Settings() runs at import of src.settings and these fields are required (no
+# defaults). Inject hermetic dummies so the suite never depends on a real .env;
+# setdefault → os.environ wins over .env, so values stay deterministic in CI too.
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123456789:AAFakeTestTokenNotReal_0123456789abcdef")
+os.environ.setdefault("LABEL_MAKER_URL", "http://label-maker.test")
+os.environ.setdefault("CUPS_HOST", "cups.test")
+os.environ.setdefault("GRIST_BASE_URL", "https://grist.test")
+os.environ.setdefault("GRIST_DOC_ID", "testdoc")
+os.environ.setdefault("GRIST_API_KEY", "test-grist-key")
+os.environ.setdefault("GLAZE_SITE_URL", "https://glaze.test")
 
 from unittest.mock import AsyncMock, MagicMock  # noqa: E402
 

@@ -1,0 +1,17 @@
+.git
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+data/
+tests/
+.github/
+*.md
+.DS_Store
+
+# dev/test-only — never needed in the runtime image
+requirements-dev.txt
+pytest.ini
+.pytest_cache/
+.coverage

@@ -12,7 +12,8 @@ src/__pycache__/
 *.swp
 .DS_Store
 logs/
-data/*.db
+data/*           # runtime state is never committed...
+!data/.gitkeep   # ...but keep the directory itself
 
 # test / coverage artifacts
 .pytest_cache/

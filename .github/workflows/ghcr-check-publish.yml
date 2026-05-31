@@ -8,8 +8,35 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: pip install -r requirements-dev.txt
+
+    - name: Run tests
+      env:
+        # Required settings have no defaults — provide hermetic test values.
+        # (conftest also injects these, this is belt-and-suspenders.)
+        TELEGRAM_BOT_TOKEN: test-token
+        LABEL_MAKER_URL: http://label-maker.test
+        CUPS_HOST: cups.test
+        GRIST_BASE_URL: https://grist.test
+        GRIST_DOC_ID: testdoc
+        GRIST_API_KEY: test-key
+        GLAZE_SITE_URL: https://glaze.test
+      run: pytest --tb=short -q
+
   build:
     runs-on: ubuntu-latest
+    needs: test                          # red tests block the image build/push
     steps:
     - uses: actions/checkout@v4
 
