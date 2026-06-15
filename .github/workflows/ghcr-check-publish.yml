@@ -25,7 +25,7 @@ jobs:
       env:
         # Required settings have no defaults — provide hermetic test values.
         # (conftest also injects these, this is belt-and-suspenders.)
-        TELEGRAM_BOT_TOKEN: test-token
+        TELEGRAM_BOT_TOKEN: "123456789:AAFakeTestTokenNotReal_0123456789abcdef"  # must be aiogram-valid (digits:rest)
         LABEL_MAKER_URL: http://label-maker.test
         CUPS_HOST: cups.test
         GRIST_BASE_URL: https://grist.test

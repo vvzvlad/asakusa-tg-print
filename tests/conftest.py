@@ -209,6 +209,11 @@ async def bot(storage, monkeypatch):
     `side_effect` per test to drive happy and failure paths.
     """
     from src.settings import settings as st
+    # aiogram validates the token *format* when Bot() is constructed, so force a
+    # valid-format dummy here. os.environ.setdefault above does NOT override a
+    # malformed token already in the environment (e.g. CI's "test-token"), which
+    # would otherwise make every bot test fail with TokenValidationError.
+    monkeypatch.setattr(st, "telegram_bot_token", "123456789:AAFakeTestTokenNotReal_0123456789abcdef")
     monkeypatch.setattr(st, "allowed_user_ids", "111")
     monkeypatch.setattr(st, "allowed_chat_ids", "222")
 
