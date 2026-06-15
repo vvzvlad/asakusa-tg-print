@@ -17,6 +17,12 @@ class Storage:
         self.db: aiosqlite.Connection | None = None
 
     async def init(self) -> None:
+        # Idempotent: a second call must not open a second connection. The old
+        # `self.db` would be overwritten without being closed, leaking its
+        # background aiosqlite thread (a non-daemon thread that then blocks
+        # interpreter shutdown — e.g. it hangs pytest at the end of a run).
+        if self.db is not None:
+            return
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.db = await aiosqlite.connect(self.path)
         self.db.row_factory = aiosqlite.Row
@@ -63,3 +69,6 @@ class Storage:
     async def close(self) -> None:
         if self.db is not None:
             await self.db.close()
+            # Drop the handle so a later init() reconnects instead of reusing a
+            # closed connection (keeps the init/close lifecycle sound).
+            self.db = None

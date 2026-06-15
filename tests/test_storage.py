@@ -47,6 +47,20 @@ async def test_init_is_idempotent():
         await s.close()
 
 
+async def test_init_twice_does_not_open_a_second_connection():
+    # Regression guard: init() used to reconnect unconditionally, overwriting and
+    # leaking the previous connection (a non-daemon aiosqlite thread that hangs
+    # interpreter/pytest shutdown). A second init() must reuse the same handle,
+    # and close() must drop it.
+    s = Storage(":memory:")
+    await s.init()
+    first = s.db
+    await s.init()
+    assert s.db is first
+    await s.close()
+    assert s.db is None
+
+
 # ── migration of an old DB lacking the `kind` column ─────────────────────────
 
 async def test_init_migrates_old_db_adding_kind_column(tmp_path):
