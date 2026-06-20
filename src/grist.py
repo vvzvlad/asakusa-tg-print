@@ -3,7 +3,7 @@ from loguru import logger
 
 from src.settings import settings
 
-GLAZE_TABLE = "For_print"
+GLAZE_TABLE = "Glazes"
 MAKERS_TABLE = "GlazeMakers"
 
 
@@ -12,7 +12,7 @@ class GristError(Exception):
 
 
 class GristClient:
-    """Reads glaze rows from the Grist `For_print` table over the REST API.
+    """Reads glaze rows from the Grist `Glazes` table over the REST API.
 
     The label's maker link comes from the `Maker` reference column, resolved
     against the `GlazeMakers` table (i.e. the `$Maker.Makerlink` formula).
@@ -42,7 +42,7 @@ class GristClient:
         return data["records"]
 
     async def find_glaze(self, query: str) -> dict | None:
-        """Find the first For_print row whose GeneralName matches `query`.
+        """Find the first Glazes row whose GeneralName matches `query`.
 
         Prefers a case-insensitive exact match, otherwise the first
         case-insensitive substring match in table order. The returned dict is

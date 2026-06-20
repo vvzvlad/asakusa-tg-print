@@ -3,7 +3,7 @@
 GristClient reads settings in __init__, so every test monkeypatches the
 src.settings.settings singleton BEFORE constructing the client. The two endpoints
 exercised are:
-    GET https://grist.test/api/docs/DOC/tables/For_print/records
+    GET https://grist.test/api/docs/DOC/tables/Glazes/records
     GET https://grist.test/api/docs/DOC/tables/GlazeMakers/records
 """
 

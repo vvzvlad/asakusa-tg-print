@@ -21,7 +21,7 @@ Factories (plain functions, import from `tests.conftest`)
 ---------------------------------------------------------
 - `make_message(text="", *, user_id=111, chat_id=222, reply_text=None, reply_caption=None)`
 - `make_callback(data, *, user_id=111, message=_DEFAULT, inaccessible=False)`
-- `make_glaze_fields(**overrides)`   -> a `For_print` row's `fields` dict (for glaze_entities)
+- `make_glaze_fields(**overrides)`   -> a `Glazes` row's `fields` dict (for glaze_entities)
 - `make_glaze_record(**overrides)`   -> a full Grist record `{"id":.., "fields": {..}}`
 
 Stub conventions
@@ -151,7 +151,7 @@ def make_callback(data, *, user_id=111, message=_DEFAULT, inaccessible=False) ->
 # ── Grist data factories ─────────────────────────────────────────────────────
 
 def make_glaze_fields(**overrides) -> dict:
-    """A `For_print` row's `fields` dict, suitable for `glaze_entities(fields)`."""
+    """A `Glazes` row's `fields` dict, suitable for `glaze_entities(fields)`."""
     fields = {
         "GeneralName": "Лазурит Синий",
         "Surface": "Глянцевая",

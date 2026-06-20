@@ -1,7 +1,7 @@
 """Unit tests for the two pure functions in src/grist.py.
 
 `_ref_id` extracts a row id from a Grist Reference cell value (bare int or the
-tagged ["R", "<Table>", <rowId>] form). `glaze_entities` maps a For_print row's
+tagged ["R", "<Table>", <rowId>] form). `glaze_entities` maps a Glazes row's
 fields into the eight %E1%..%E8% template placeholders, reading
 settings.glaze_site_url at call time (so tests monkeypatch it first).
 """

@@ -38,7 +38,7 @@ Entry point `main.py` opens the SQLite store, constructs `PrintBot` (`src/bot.py
 ### Commands
 - **`/print <text>`** (or sent as a reply — uses the replied message's text): full preview → confirm flow above.
 - **`/sudoprint <text>`**: same render+print but **skips confirmation** — prints immediately.
-- **`/printglaze <name>`**: `GristClient.find_glaze()` looks up the row in the `For_print` table by `GeneralName` (exact case-insensitive, else substring), resolves the `Maker` reference into a `Makerlink` from the `GlazeMakers` table, then `glaze_entities()` (`src/grist.py`) maps the row's fields into the template's `%E1%..%E8%` placeholders. Rendered with the glaze template, then the standard preview/confirm/print flow.
+- **`/printglaze <name>`**: `GristClient.find_glaze()` looks up the row in the `Glazes` table by `GeneralName` (exact case-insensitive, else substring), resolves the `Maker` reference into a `Makerlink` from the `GlazeMakers` table, then `glaze_entities()` (`src/grist.py`) maps the row's fields into the template's `%E1%..%E8%` placeholders. Rendered with the glaze template, then the standard preview/confirm/print flow.
 
 ### Reprint persistence (`src/storage.py`)
 The SQLite `labels` table stores only `(text, chat_id, user_id, kind, created_at)` — **never the PDF**. Reprint re-renders from scratch (rendering is deterministic). `kind` is `"text"` or `"glaze"`; on reprint a `glaze` row **re-queries Grist** by its stored name, so glaze reprints reflect current Grist data, not a snapshot. `init()` self-migrates older DBs that lack the `kind` column.
