@@ -46,10 +46,14 @@ python -m py_compile main.py src/*.py   # quick syntax check
   inline `VAR=... python main.py`), and are read through `Settings`.
 - No default/example credentials anywhere in code, not even commented out.
 - Code comments in English.
-- Tests are required for new code. In CI `build` depends on `test`, so red tests
-  block the image build/push.
+- Tests are required for new code. In CI the build depends on the test job, and the
+  push depends on a smoke gate (`ci/smoke.py`) that runs against the built image — so
+  red tests or a red gate stop anything from reaching the registry.
 
 ## Deploy
-Production pulls `ghcr.io/vvzvlad/asakusa-tg-print:latest` (built & pushed by CI),
-runs it via `docker-compose.yml` with a volume on `/app/data`; watchtower
-auto-updates on new `:latest`. The bot uses long polling — no inbound port.
+Production pulls `gitea.vvzvlad.xyz/projects/asakusa-tg-print:latest`, built,
+smoke-tested and pushed by `.gitea/workflows/image-check-publish.yml` on a push to
+`main`, and runs it via `docker-compose.yml` with a volume on `/app/data`. Portainer's
+own image updater redeploys on a new `:latest` — that is what the
+`io.portainer.update.enable` label does; this stack carries no watchtower label and
+must not be given one. The bot uses long polling — no inbound port.

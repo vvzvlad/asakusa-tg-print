@@ -56,11 +56,19 @@ nobody can print. A trusted chat means everyone in it may print.
 
 ## Deploy
 
-CI (`.github/workflows/ghcr-check-publish.yml`) runs the tests, then builds and
-pushes `ghcr.io/vvzvlad/asakusa-tg-print:latest` — `build` depends on `test`, so red
-tests block the image. Production runs the prebuilt image via
-[`docker-compose.yml`](docker-compose.yml) with a volume on `/app/data`; watchtower
-auto-updates it. The bot uses long polling (no inbound port).
+CI lives in `.gitea/workflows/`. On a push to `main`,
+[`image-check-publish.yml`](.gitea/workflows/image-check-publish.yml) runs the tests,
+builds the image, smoke-tests the built image with [`ci/smoke.py`](ci/smoke.py), and
+only then pushes `gitea.vvzvlad.xyz/projects/asakusa-tg-print` as `:<sha>` and
+`:latest`, in that order. Each stage gates the next, so red tests or a red smoke mean
+nothing reaches the registry. Pull requests run
+[`tests.yml`](.gitea/workflows/tests.yml), which runs the same tests, the same build
+and the same gate but never logs in and never pushes.
+
+Production runs the prebuilt image via [`docker-compose.yml`](docker-compose.yml) with
+a volume on `/app/data` and follows `:latest`; Portainer's own image updater redeploys
+it, which is what the `io.portainer.update.enable` label turns on (there is no
+watchtower on this stack). The bot uses long polling (no inbound port).
 
 See [`AGENTS.md`](AGENTS.md) for contributor/agent conventions and
 [`CLAUDE.md`](CLAUDE.md) for architecture details.

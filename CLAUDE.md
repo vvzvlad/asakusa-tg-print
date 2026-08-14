@@ -18,12 +18,19 @@ python main.py
 
 # Dependencies
 pip install -r requirements.txt          # a .venv/ exists in the repo
+pip install -r requirements-dev.txt      # + pytest/respx, for the test suite below
 
-# Syntax check — there is NO test suite; this is the validation used in this repo
-python -m py_compile main.py src/*.py
+# Tests — 12 modules, 148 tests. tests/conftest.py injects the required settings, so
+# this needs no environment of its own. CI runs exactly this, in a python:3.12-slim
+# container, and the image build depends on it.
+pytest
 
-# Docker (what .github/workflows/ghcr-check-publish.yml builds & pushes to ghcr on push to main)
+# Docker (what .gitea/workflows/image-check-publish.yml builds on a push to main)
 docker build . -f Dockerfile -t asakusa-tg-print
+
+# The gate that stands between that build and the registry: it drives docker itself, so
+# it needs a built image and a docker daemon, and it takes both variables with no defaults.
+SMOKE_IMAGE=asakusa-tg-print SMOKE_NAME=local-smoke python3 ci/smoke.py
 ```
 
 The container needs the `lp` binary — the Dockerfile installs `cups-client`. PyMuPDF must be `>=1.24.3` (the top-level `import pymupdf` alias used in `src/preview.py` only exists from that version).

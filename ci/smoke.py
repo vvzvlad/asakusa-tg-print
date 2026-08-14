@@ -41,7 +41,7 @@ pinned wheels in requirements.txt, which is exactly the point of running it in t
 
 What this gate can be, and what it cannot
 -----------------------------------------
-There IS a test suite in this repo — thirteen pytest modules — and it runs in its own job
+There IS a test suite in this repo — twelve pytest modules, 148 tests — and it runs in its own job
 before the image is built. That makes this gate's job narrower and sharper than "does the code
 work": the tests already answer that, in a checkout, against source files, with every
 collaborator mocked. What they cannot answer is whether the ARTEFACT that gets deployed carries
@@ -66,8 +66,10 @@ shipping broken while the whole suite stays green:
   raises a specific "install the cups-client package" error when the binary is absent — a base
   image change that dropped it would ship a container that starts, answers in Telegram, renders
   previews, and fails only at the moment somebody presses «Печать». The probe runs the REAL
-  `Printer.print_pdf()` against a CUPS address that refuses connections, and requires the
-  failure to be the "lp failed" branch rather than the "not found" branch. Probe.
+  `Printer.print_pdf()` against a CUPS address that refuses connections, and requires the failure
+  to be a genuine CUPS failure: neither the "not found" branch nor an exit of 126/127, which is
+  what a binary that is present but cannot be LOADED exits with and which printer.py words
+  exactly like a CUPS error. Probe.
 * (d) both label templates are in the image, non-empty and parseable as JSON. They are copied by
   their own `COPY templates/ templates/` line, so they can go missing independently of the code.
   Probe.
@@ -214,6 +216,21 @@ STARTUP_MARKER = "Starting Asakusa Label Printer Bot"
 # that the relative template path resolved against the real WORKDIR.
 STORAGE_MARKER = "Label store ready at"
 TEMPLATE_MARKER = "Loaded label template"
+
+# All three, in the order main.py emits them, and the poll in check_real_command() waits for the
+# WHOLE list rather than for the first one. That is a bug fix, not tidiness: the three lines are
+# written by three separate statements, so a poll that stopped at STARTUP_MARKER would then judge
+# the other two against a snapshot of the log taken microseconds after the first line was
+# flushed. Locally the gap between the first and the last is about 6 ms, which is why it looked
+# fine; on the runner the container starts on a freshly written overlay and the `await
+# self.db.commit()` between them goes to disk with an fsync, so the gap grows by orders of
+# magnitude. The failure that buys is a FALSE RED on the gate that blocks publication —
+# intermittently refusing to ship a perfectly good image, which is the most expensive kind of
+# flake there is, because the second run passes and the first one teaches everybody that a red
+# gate means nothing.
+# Waiting for all three costs nothing when they are all present, and the STARTUP_BUDGET deadline
+# below still bounds the case where one of them genuinely never arrives.
+STARTUP_MARKERS = (STARTUP_MARKER, STORAGE_MARKER, TEMPLATE_MARKER)
 
 # Printed by the probe on its last line and nowhere else. DECLARED TWICE — here and again inside
 # the PROBE text — and the two have to keep agreeing. The duplication is deliberate:
@@ -392,6 +409,19 @@ EXPECTED_HANDLERS = {"message": 4, "callback_query": 3}
 # branch carries lp's own message, which is CUPS's to change and is never matched here.
 LP_MISSING_FRAGMENT = "install the cups-client package"
 
+# The other failure that must NOT be counted as success, and the one the naive version of this
+# check quietly passed. A binary that is on PATH but cannot actually RUN — the base image moved
+# to a different libc, a layer lost a shared object, the file lost its executable bit — does not
+# raise FileNotFoundError: `execve` succeeds and it is the loader that fails, printing
+# `error while loading shared libraries` and exiting 127 (126 for "found but not executable").
+# printer.py has no way to tell that apart from a CUPS error and folds it into the same
+# `lp failed (<code>): ...` string, which is exactly the branch this check treats as proof that
+# lp works. So the STATUS CODE is discriminated on, not the message: `create_subprocess_exec`
+# runs the binary directly with no shell in between, so 126 and 127 cannot come from anywhere but
+# the loader — CUPS's own lp exits 1 on its errors. The matched prefix is printer.py's own
+# formatting, not CUPS's wording.
+LP_LOADER_FRAGMENTS = ("lp failed (126", "lp failed (127")
+
 # Bounds the real `lp` invocation. The connection it attempts is to 127.0.0.1:1 inside this
 # container, which is refused instantly, so this is not a timeout that is expected to be
 # approached — it is there so that an `lp` which somehow blocks cannot hang the probe and, with
@@ -407,6 +437,21 @@ def describe(error):
     return "{}: {}".format(type(error).__name__, error)
 
 
+def one_line(text):
+    """Fold text onto a single line for the report.
+
+    The report's contract is one row per line — the outer half parses these lines back into its
+    own report by matching the `ok `/`FAIL ` prefix — and a reason is free to be multi-line:
+    `describe()` on a pydantic ValidationError prints a paragraph per field, and an lp error can
+    carry an embedded newline of its own. Without this fold every line after the first fails to
+    match that prefix on the way out and is dropped, so the reason arrives truncated at exactly
+    the point where it started being useful.
+    Nothing is actually lost by folding: the outer half prints this program's raw, unfolded
+    output as a transcript above its report, so the original shape is still one screen away.
+    """
+    return " ".join(text.split())
+
+
 def minimal_pdf():
     """A one-page PDF, assembled here byte by byte, with a correct cross-reference table.
 
@@ -415,11 +460,23 @@ def minimal_pdf():
     document produced by the same library would let a writer and a parser agree with each other
     while neither actually works. 165x114 points is the label's real page box (58x40 mm), so this
     is the shape the service rasterises in production.
+
+    The page carries a real content stream that DRAWS TEXT with a Base-14 font, and that is not
+    decoration either. An empty page rasterises to a uniform white bitmap through a code path
+    that never touches font loading, glyph lookup or the text renderer — and every label this
+    service prints is text. So the page says something, and the check that consumes this requires
+    the resulting raster to be something other than blank.
     """
+    # Base-14: /Helvetica needs no embedded font file, so this stays a self-contained document
+    # while still forcing MuPDF down its font machinery.
+    content = b"BT /F1 12 Tf 10 50 Td (smoke) Tj ET\n"
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 165 114] /Resources << >> >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 165 114] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length %d >>\nstream\n" % len(content) + content + b"endstream",
     ]
     out = io.BytesIO()
     out.write(b"%PDF-1.4\n")
@@ -563,12 +620,21 @@ async def check_rasteriser():
 
     So it goes through `src.preview.pdf_to_png` — the very function src/bot.py calls — rather
     than through pymupdf directly, and it checks the BYTES that come back.
+
+    "It returned a PNG" is not by itself enough, which is why there is a second row: the input
+    page draws text, and a renderer that produced a correct, well-formed, completely BLANK bitmap
+    would satisfy every structural check while proving that nothing was ever drawn. So the PNG is
+    decoded back into a pixmap and required to contain at least one non-white byte. A blank
+    165x114 render comes back as 56430 bytes of 0xFF and exactly one distinct value; the same
+    page with `(smoke)` on it comes back with over a hundred.
     """
+    ink_target = "...and the raster is not blank, so the text was really drawn"
     target = "src.preview.pdf_to_png rasterises a real PDF to a real PNG"
     try:
         from src.preview import pdf_to_png
     except Exception as error:
-        return [(target, "src.preview could not be imported: {}".format(describe(error)))]
+        reason = "src.preview could not be imported: {}".format(describe(error))
+        return [(target, reason), (ink_target, "not attempted: " + reason)]
 
     pdf = minimal_pdf()
     try:
@@ -576,18 +642,48 @@ async def check_rasteriser():
         # path is identical either way.
         png = await pdf_to_png(pdf, dpi=72)
     except Exception as error:
-        return [(target, (
+        reason = (
             "it raised {}. The module imported, so this is the compiled half of pymupdf failing "
             "at render time — the exact failure that an import check would have called green "
-            "while every preview in production came back broken".format(describe(error))))]
+            "while every preview in production came back broken".format(describe(error)))
+        return [(target, reason), (ink_target, "not attempted: the render raised")]
 
     if not isinstance(png, (bytes, bytearray)):
-        return [(target, "it returned {}, not bytes".format(type(png).__name__))]
+        reason = "it returned {}, not bytes".format(type(png).__name__)
+        return [(target, reason), (ink_target, "not attempted: " + reason)]
     if not bytes(png).startswith(PNG_MAGIC):
-        return [(target, (
-            "it returned {} bytes that are not a PNG (first bytes: {!r})".format(
-                len(png), bytes(png)[:12])))]
-    return [("{} ({} bytes in, {} bytes out)".format(target, len(pdf), len(png)), None)]
+        reason = "it returned {} bytes that are not a PNG (first bytes: {!r})".format(
+            len(png), bytes(png)[:12])
+        return [(target, reason), (ink_target, "not attempted: the output is not a PNG")]
+    rows = [("{} ({} bytes in, {} bytes out)".format(target, len(pdf), len(png)), None)]
+
+    # Decoded back into a pixmap so the SAMPLES can be looked at: a PNG's pixels are deflated, so
+    # the bytes returned above say nothing about what is in the picture. `Pixmap(bytes)` is
+    # pymupdf's own image reader, which means this row exercises a second compiled code path
+    # rather than trusting the first one's word for it.
+    try:
+        import pymupdf
+        samples = pymupdf.Pixmap(bytes(png)).samples
+    except Exception as error:
+        rows.append((ink_target, (
+            "the PNG could not be decoded back for inspection: {}. pdf_to_png returned something "
+            "with a PNG signature that pymupdf itself will not read".format(describe(error)))))
+        return rows
+    if not samples:
+        rows.append((ink_target, "the decoded pixmap has no samples at all"))
+        return rows
+    darkest = min(samples)
+    if darkest == 255:
+        rows.append((ink_target, (
+            "every one of the {} sample bytes is 0xFF, i.e. the page rasterised to pure white. "
+            "The input draws `(smoke)` in Base-14 Helvetica, so the geometry was rendered and the "
+            "TEXT was not: MuPDF's font machinery is not producing glyphs in this image, and "
+            "every label — which is nothing but text — would print blank while this gate and the "
+            "bot both reported success".format(len(samples)))))
+        return rows
+    rows.append(("{} (darkest sample 0x{:02X} of {} bytes)".format(
+        ink_target, darkest, len(samples)), None))
+    return rows
 
 
 async def check_storage():
@@ -681,6 +777,16 @@ async def check_bot_construction():
     lazy_target = "...and its lazy glaze LabelMaker defers loading instead"
 
     every_target = (build_target, handlers_target, eager_target, lazy_target)
+
+    # Which of the four have had a verdict recorded. The report text is allowed to carry a suffix
+    # (" (7 nodes)"), so "did this target get answered" cannot be decided by looking for it in the
+    # rows — the fallback in the exception handler at the bottom checks this set instead.
+    answered = set()
+
+    def record(target, reason, shown=None):
+        rows.append((shown or target, reason))
+        answered.add(target)
+
     try:
         from src.bot import PrintBot
         from src.storage import Storage
@@ -696,26 +802,26 @@ async def check_bot_construction():
         try:
             bot = PrintBot(store)
         except Exception as error:
-            rows.append((build_target, (
+            record(build_target, (
                 "it raised {}. Nothing in that constructor is allowed to need a peer, so this is "
                 "the image: a template that cannot be read from the working directory, a wheel "
                 "whose API moved, or a token the aiogram in this image will not "
-                "accept".format(describe(error)))))
+                "accept".format(describe(error))))
             for target in every_target[1:]:
-                rows.append((target, "not attempted: the constructor raised"))
+                record(target, "not attempted: the constructor raised")
             return rows
-        rows.append((build_target, None))
+        record(build_target, None)
 
         counts = count_handlers(bot.dp)
         if counts != EXPECTED_HANDLERS:
-            rows.append((handlers_target, (
+            record(handlers_target, (
                 "the dispatcher holds {!r} instead. Four commands (/start, /print, /printglaze, "
                 "/sudoprint) and three callback prefixes (print:, cancel:, reprint:) are supposed "
                 "to be registered; a mismatch means either a handler stopped being registered — "
                 "in which case that command silently does nothing in the chat — or one was added "
-                "and this constant needs updating".format(counts))))
+                "and this constant needs updating".format(counts)))
         else:
-            rows.append((handlers_target, None))
+            record(handlers_target, None)
 
         # `_template` rather than the `template` property on purpose: the property LOADS on first
         # access, so reading it would make both makers look identical and would prove nothing
@@ -724,26 +830,36 @@ async def check_bot_construction():
         # while the glaze one is optional by design and must not take startup down with it.
         eager = getattr(bot.label_maker, "_template", None)
         if not isinstance(eager, dict) or not eager.get("nodes"):
-            rows.append((eager_target, (
+            record(eager_target, (
                 "it is {!r}. LabelMaker() without lazy=True is supposed to read "
                 "templates/label_template.json during construction, so this means the eager load "
                 "stopped happening and a missing template would now surface at print time "
-                "instead of at startup".format(type(eager).__name__))))
+                "instead of at startup".format(type(eager).__name__)))
         else:
-            rows.append(("{} ({} nodes)".format(eager_target, len(eager["nodes"])), None))
+            record(eager_target, None,
+                   shown="{} ({} nodes)".format(eager_target, len(eager["nodes"])))
 
         if getattr(bot.glaze_maker, "_template", "absent") is not None:
-            rows.append((lazy_target, (
+            record(lazy_target, (
                 "it has already loaded one. The glaze template is deliberately lazy so that its "
-                "absence cannot crash startup; an eager load here reverses that")))
+                "absence cannot crash startup; an eager load here reverses that"))
         else:
-            rows.append((lazy_target, None))
+            record(lazy_target, None)
         return rows
     except Exception as error:
         # A distinct target rather than build_target, so a failure here cannot print a second,
         # contradictory verdict against a row that has already been reported ok.
         rows.append(("the PrintBot construction check ran to completion",
                      "it raised {}".format(describe(error))))
+        # Then fill in whatever never got a verdict. Without this the four specific rows collapse
+        # into the single general one above whenever something between them raises — `await
+        # store.init()` and count_handlers() are both outside the inner try — and this file's own
+        # invariant is that a check which could not run is reported as FAILED rather than
+        # silently dropped. The two blocks above already do this by hand; this is the same thing
+        # for the paths nobody enumerated.
+        for target in every_target:
+            if target not in answered:
+                record(target, "not attempted: the check raised before reaching it")
         return rows
     finally:
         if bot is not None:
@@ -771,10 +887,17 @@ async def check_lp_binary():
 
     `shutil.which` alone would not settle it: a binary can be present and still fail to execute,
     which is what a base image with a different libc looks like. So this runs the REAL
-    `Printer.print_pdf()` against a CUPS address that refuses connections, and requires the
-    resulting PrinterError to be the "lp failed" branch rather than the "lp not found" branch.
-    Only THIS REPO'S OWN wording is matched, and only to rule that branch out — lp's own error
-    text belongs to CUPS and is never matched here.
+    `Printer.print_pdf()` against a CUPS address that refuses connections, and then rules out
+    BOTH ways of not really running:
+
+      * the "lp not found" branch, which printer.py raises on FileNotFoundError;
+      * an exit of 126 or 127, which printer.py cannot distinguish from a CUPS failure and words
+        identically. That is the case this docstring used to claim to catch while the check
+        counted it as a pass — see LP_LOADER_FRAGMENTS for why the status code is the honest
+        discriminator and the message is not.
+
+    Only THIS REPO'S OWN wording is matched, and only to rule those two out — lp's own error text
+    belongs to CUPS and is never matched here.
     """
     rows = []
     which_target = "the `lp` binary is on PATH inside the image"
@@ -807,12 +930,24 @@ async def check_lp_binary():
         message = str(error)
         if LP_MISSING_FRAGMENT in message:
             rows.append((run_target, (
-                "it raised the missing-binary branch: {!r}. `lp` was found on PATH a moment ago, "
-                "so it is there and cannot be executed — a dynamic linker failure, or a file "
-                "that is not executable".format(message))))
+                "it raised the missing-binary branch: {!r}. `shutil.which` found lp on PATH a "
+                "moment ago, so this means the subprocess could not be spawned at all — the path "
+                "went stale between the two calls, or exec was refused".format(message))))
+        elif any(fragment in message for fragment in LP_LOADER_FRAGMENTS):
+            # See LP_LOADER_FRAGMENTS: this is the case the docstring promises to catch and the
+            # naive form of this check counted as a pass, because printer.py words it exactly
+            # like a real CUPS failure.
+            rows.append((run_target, (
+                "lp exited with a loader status: {!r}. The file is on PATH and printer.py spawned "
+                "it, but it never got as far as running its own code — 126 is 'found and not "
+                "executable', 127 is the dynamic linker giving up on a missing or incompatible "
+                "shared library. Neither can come from CUPS here, because print_pdf() execs the "
+                "binary directly with no shell in between. A base image change is the usual "
+                "cause, and printing would be dead in production while the container looked "
+                "healthy".format(message))))
         else:
-            # The expected outcome: lp ran, could not reach a CUPS server on a port nothing
-            # listens on, and printer.py turned its non-zero exit into the other branch.
+            # The expected outcome: lp ran its own code, could not reach a CUPS server on a port
+            # nothing listens on, and printer.py turned its non-zero exit into the other branch.
             rows.append(("{} ({})".format(run_target, message[:120]), None))
     except asyncio.TimeoutError:
         rows.append((run_target, (
@@ -872,10 +1007,13 @@ async def main():
 
     failures = []
     for target, reason in rows:
+        # Both halves of the row go through one_line(): a target can pick up an lp message with a
+        # newline in it just as easily as a reason can be a multi-paragraph ValidationError, and
+        # either one would break the one-row-per-line contract the outer half parses on.
         if reason is None:
-            print("ok   {}".format(target))
+            print("ok   {}".format(one_line(target)))
         else:
-            print("FAIL {} -> {}".format(target, reason))
+            print("FAIL {} -> {}".format(one_line(target), one_line(reason)))
             failures.append(target)
 
     if failures:
@@ -1230,12 +1368,16 @@ def check_real_command(image, name):
     # Polled rather than slept on, and bounded in wall clock: `docker logs` works on a container
     # that has already exited, so this reads the same log either way and does not care whether
     # the process is still alive by the time the marker is looked for.
+    # The exit condition is ALL of STARTUP_MARKERS, not just the first one — see the note on that
+    # constant. Every verdict below is decided against the single snapshot this loop leaves in
+    # `logs`, so a loop that returned as soon as the first line appeared would be judging the
+    # other two on a log that had not been given the chance to contain them yet.
     deadline = time.monotonic() + STARTUP_BUDGET
     logs = ""
     log_status = None
     while True:
         log_status, logs = docker(["logs", name], LOGS_TIMEOUT)
-        if log_status == 0 and STARTUP_MARKER in logs:
+        if log_status == 0 and all(marker in logs for marker in STARTUP_MARKERS):
             break
         if time.monotonic() >= deadline:
             break
@@ -1252,14 +1394,14 @@ def check_real_command(image, name):
             "malformed — or the interpreter never started at all. Logs:\n{}".format(
                 STARTUP_BUDGET, excerpt(logs)))))
         rows.append((storage_target, None if STORAGE_MARKER in logs else (
-            "it is not there. Storage.init() logs it once the database is open and the schema is "
-            "in place, so the store did not finish opening under the real command. "
-            "Logs:\n{}".format(excerpt(logs)))))
+            "it never appeared in {} s. Storage.init() logs it once the database is open and the "
+            "schema is in place, so the store did not finish opening under the real command. "
+            "Logs:\n{}".format(STARTUP_BUDGET, excerpt(logs)))))
         rows.append((template_target, None if TEMPLATE_MARKER in logs else (
-            "it is not there. LabelMaker logs it after reading a template through its relative "
-            "path, which only resolves because the image's WORKDIR is {}. Its absence means "
-            "PrintBot never got that far, or the templates are not where the code looks for "
-            "them. Logs:\n{}".format(APP_DIR, excerpt(logs)))))
+            "it never appeared in {} s. LabelMaker logs it after reading a template through its "
+            "relative path, which only resolves because the image's WORKDIR is {}. Its absence "
+            "means PrintBot never got that far, or the templates are not where the code looks "
+            "for them. Logs:\n{}".format(STARTUP_BUDGET, APP_DIR, excerpt(logs)))))
 
     rows.extend(check_database_file(name))
 
@@ -1278,10 +1420,15 @@ def check_database_file(name):
 
     Read with `docker cp` rather than with `docker exec`, and that is the whole trick: the
     container started with the image's real command is expected to be short-lived — it dies at
-    the first Telegram call — and `docker exec` needs a RUNNING container while `docker cp`
-    reads the filesystem of a stopped one just as happily. Racing the exit with an exec would
-    make this check flaky in the one direction nobody notices, the one where it goes green
-    because it ran early enough.
+    the first Telegram call — and `docker exec` needs a RUNNING container while `docker cp` reads
+    the filesystem of a stopped one just as happily.
+
+    An exec here would therefore be a race against that exit, and the direction it flakes in is
+    worth being precise about: an exec that WON the race would find a live container and answer
+    honestly, while one that LOST it would fail against a container that had already exited
+    having done everything right. So the flake is a false RED on a healthy image, on the gate
+    that blocks publication — not a false green. `docker cp` does not make that race rarer, it
+    removes it: the filesystem is there to be read whether the process is still running or not.
 
     Copying the whole directory rather than the one file means a failure carries the listing that
     explains it.

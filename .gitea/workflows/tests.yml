@@ -222,11 +222,12 @@ jobs:
         # SMOKE_NAME is not here: it is set once at job level, so this step and the cleanup step
         # below are guaranteed to be talking about the same containers.
         SMOKE_IMAGE: ${{ steps.tags.outputs.smoke }}
-      # The body of this step is byte-identical to the one in image-check-publish.yml. Only the
-      # `env:` values above differ. The PR gate and the publishing gate must run the same checks
-      # against the same kind of container, and the cheapest way to guarantee that is for the two
-      # to be literally the same text — anything else drifts, and it drifts silently, in the
-      # direction of the PR gate testing less.
+      # The `run:` body of this step is byte-identical to the one in image-check-publish.yml —
+      # the commentary above it and the `env:` values are free to differ, and do. The PR gate and
+      # the publishing gate must run the same checks against the same kind of container, and the
+      # cheapest way to guarantee that is for the executed text to be literally the same text —
+      # anything else drifts, and it drifts silently, in the direction of the PR gate testing
+      # less.
       run: |
         python3 ci/smoke.py
 
@@ -264,21 +265,25 @@ jobs:
       # This gate runs on every push to a PR, so it produces MORE of that garbage than the
       # publishing workflow does — see the full note in image-check-publish.yml.
       # `always()` so a failed smoke still cleans up after itself.
+      # There is no push step in this file, so the empty-tag-list guard that
+      # image-check-publish.yml's push step carries has no counterpart here — and needs none. The
+      # asymmetry is deliberate there: publishing nothing while reporting success is a silent
+      # deploy failure, whereas removing nothing when there is nothing to remove is simply the
+      # correct outcome.
       if: always()
       env:
         # Same reasoning as in the build step: pass the tags through the environment, and leave
         # `$TAGS` unquoted so it word-splits into items.
         TAGS: ${{ steps.tags.outputs.tags }}
       run: |
-        # An empty $TAGS is legitimate HERE, unlike in the push step of image-check-publish.yml,
-        # and is deliberately not rejected. It can arise two ways, and neither leaves a tag for
-        # this loop to remove. If `Compute image tags` FAILED, the build step never ran and
-        # nothing was created at all. If it succeeded but wrote no output, the build ran without
-        # any `--tag`, so the image it produced is untagged: dangling, unreachable by name, and
-        # reclaimable only by the periodic prune on the runner host, never by this loop — and that
-        # run still goes red, because the smoke step gets an empty SMOKE_IMAGE and ci/smoke.py
-        # refuses to start.
-        # Do not "fix" this symmetrically with the guard in that push step: there, publishing
-        # nothing while reporting success is a silent deploy failure; here, removing nothing when
-        # there is nothing to remove is the correct outcome.
+        # An empty $TAGS is legitimate HERE and is deliberately not rejected. It can arise two
+        # ways, and neither leaves a tag for this loop to remove. If `Compute image tags` FAILED,
+        # the build step never ran and nothing was created at all. If it succeeded but wrote no
+        # output, the build ran without any `--tag`, so the image it produced is untagged:
+        # dangling, unreachable by name, and reclaimable only by the periodic prune on the runner
+        # host, never by this loop — and that run still goes red, because the smoke step gets an
+        # empty SMOKE_IMAGE and ci/smoke.py refuses to start.
+        # Removing nothing when there is nothing to remove is the correct outcome, which is why
+        # this loop carries no non-empty guard. The note above this step says why the publishing
+        # workflow's push step is deliberately the opposite.
         for tag in $TAGS; do docker rmi "$tag" || true; done
