@@ -1,4 +1,4 @@
-"""Unit tests for the module-level helpers and static auth in src.bot.
+"""Unit tests for the module-level helpers and auth in src.bot.
 
 Covers:
 - _short        : truncation/off-by-one and custom limit.
@@ -8,7 +8,6 @@ Covers:
 """
 
 from src.bot import (
-    PrintBot,
     _confirm_keyboard,
     _reply_text,
     _reprint_keyboard,
@@ -121,27 +120,27 @@ def test_reprint_keyboard_prefix_matches_routing():
 
 # ── PrintBot._authorized ─────────────────────────────────────────────────────
 
-def test_authorized_user_in_user_allowlist(monkeypatch):
+def test_authorized_user_in_user_allowlist(bot, monkeypatch):
     monkeypatch.setattr("src.settings.settings.allowed_user_ids", "111")
     monkeypatch.setattr("src.settings.settings.allowed_chat_ids", "222")
-    assert PrintBot._authorized(111, 0) is True
+    assert bot._authorized(111, 0) is True
 
 
-def test_authorized_chat_in_chat_allowlist(monkeypatch):
+def test_authorized_chat_in_chat_allowlist(bot, monkeypatch):
     monkeypatch.setattr("src.settings.settings.allowed_user_ids", "111")
     monkeypatch.setattr("src.settings.settings.allowed_chat_ids", "222")
-    assert PrintBot._authorized(0, 222) is True
+    assert bot._authorized(0, 222) is True
 
 
-def test_authorized_neither_in_allowlist(monkeypatch):
+def test_authorized_neither_in_allowlist(bot, monkeypatch):
     monkeypatch.setattr("src.settings.settings.allowed_user_ids", "111")
     monkeypatch.setattr("src.settings.settings.allowed_chat_ids", "222")
-    assert PrintBot._authorized(0, 0) is False
+    assert bot._authorized(0, 0) is False
 
 
-def test_authorized_empty_allowlists_deny_all(monkeypatch):
+def test_authorized_empty_allowlists_deny_all(bot, monkeypatch):
     # Empty lists = nobody can print.
     monkeypatch.setattr("src.settings.settings.allowed_user_ids", "")
     monkeypatch.setattr("src.settings.settings.allowed_chat_ids", "")
-    assert PrintBot._authorized(111, 222) is False
-    assert PrintBot._authorized(0, 0) is False
+    assert bot._authorized(111, 222) is False
+    assert bot._authorized(0, 0) is False

@@ -13,7 +13,14 @@ Covers:
 - _cmd_sudoprint  : auth denial, happy path (print + persist + reprint keyboard),
                     PrinterError surfaced on the status message.
 - _cmd_start      : authorized help, denied help + ids hint.
+- _on_chat_migrated : group -> supergroup service messages (both directions)
+                    persist the mapping and authorize the new chat id; a
+                    non-allowed old chat is ignored; removing the old chat
+                    from ALLOWED_CHAT_IDS revokes the migrated one; start()
+                    reloads persisted mappings after a restart.
 """
+
+from unittest.mock import AsyncMock
 
 from aiogram.filters import CommandObject
 
@@ -34,6 +41,15 @@ def _glaze_cmd(args):
 
 def _sudo_cmd(args):
     return CommandObject(command="sudoprint", args=args)
+
+
+def _migration_message(*, chat_id, to_chat_id=None, from_chat_id=None):
+    # Both fields must be set explicitly: on a MagicMock(spec=Message) an unset
+    # attribute is a truthy MagicMock, not None.
+    msg = make_message(chat_id=chat_id)
+    msg.migrate_to_chat_id = to_chat_id
+    msg.migrate_from_chat_id = from_chat_id
+    return msg
 
 
 # ── _cmd_print ───────────────────────────────────────────────────────────────
@@ -209,3 +225,60 @@ async def test_start_denied_sends_help_plus_ids_hint(bot):
     assert "⚠️" in sent
     assert "user_id: 999" in sent
     assert "chat_id: 888" in sent
+
+
+# ── _on_chat_migrated ────────────────────────────────────────────────────────
+
+async def test_chat_migrated_persists_mapping_and_authorizes_new_chat(bot):
+    # Service message in the old (allowed) group 222 pointing at the new supergroup.
+    new_id = -1000000000222
+    assert bot._authorized(999, new_id) is False
+    await bot._on_chat_migrated(_migration_message(chat_id=222, to_chat_id=new_id))
+
+    assert bot._migrated_chats == {222: new_id}
+    assert await bot.storage.get_chat_migrations() == {222: new_id}
+    # Anyone in the migrated chat may print; unrelated chats are still denied.
+    assert bot._authorized(999, new_id) is True
+    assert bot._authorized(999, 888) is False
+
+
+async def test_chat_migrated_from_message_in_new_supergroup_persists_mapping(bot):
+    # The twin service message, delivered in the new supergroup itself.
+    new_id = -1000000000222
+    await bot._on_chat_migrated(_migration_message(chat_id=new_id, from_chat_id=222))
+
+    assert bot._migrated_chats == {222: new_id}
+    assert await bot.storage.get_chat_migrations() == {222: new_id}
+    assert bot._authorized(999, new_id) is True
+
+
+async def test_chat_migrated_ignores_non_allowed_old_chat(bot):
+    # Chat 888 is not in ALLOWED_CHAT_IDS: its migration must not grant anything.
+    new_id = -1000000000888
+    await bot._on_chat_migrated(_migration_message(chat_id=888, to_chat_id=new_id))
+
+    assert bot._migrated_chats == {}
+    assert await bot.storage.get_chat_migrations() == {}
+    assert bot._authorized(999, new_id) is False
+
+
+async def test_chat_migration_revoked_when_old_chat_removed_from_env(bot, monkeypatch):
+    # The persisted pair only helps while the old chat is still allowed: removing
+    # it from ALLOWED_CHAT_IDS revokes the migrated chat too.
+    new_id = -1000000000222
+    await bot.storage.add_chat_migration(222, new_id)
+    bot._migrated_chats = {222: new_id}
+    monkeypatch.setattr("src.settings.settings.allowed_chat_ids", "")
+    assert bot._authorized(999, new_id) is False
+
+
+async def test_start_loads_migrated_chats_from_storage(bot, monkeypatch):
+    # The restart half of the feature: a mapping persisted by an earlier run must
+    # authorize the new chat again after start().
+    new_id = -1000000000222
+    await bot.storage.add_chat_migration(222, new_id)
+    monkeypatch.setattr(bot.bot, "set_my_commands", AsyncMock())
+    monkeypatch.setattr(bot.dp, "start_polling", AsyncMock())
+    await bot.start()
+    assert bot._migrated_chats == {222: new_id}
+    assert bot._authorized(999, new_id) is True

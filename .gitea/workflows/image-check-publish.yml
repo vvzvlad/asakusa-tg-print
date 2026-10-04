@@ -21,7 +21,7 @@ name: Docker Image CI
 #   * it had NO gate between building and publishing. The tests ran in a separate job against a
 #     checkout, then this job built and pushed — so nothing ever looked at the ARTEFACT. The
 #     tests mock every collaborator, including the `lp` subprocess, so an image with no
-#     cups-client in it passes all 148 of them and fails at the first print;
+#     cups-client in it passes all 155 of them and fails at the first print;
 #   * it pushed :latest FIRST and :<sha> second, so a push that failed half-way left production
 #     running a commit whose immutable twin — the only rollback point — never reached the
 #     registry;
@@ -71,7 +71,7 @@ jobs:
 
     - name: Run the test suite in a container
       # 20 minutes is far above the real cost: `pip install` of seven pinned runtime wheels plus
-      # pytest/respx, then 148 tests that touch no network, no disk outside tmp_path and no
+      # pytest/respx, then 155 tests that touch no network, no disk outside tmp_path and no
       # subprocess — well under two minutes cold. The bound is for a shared runner under load and
       # for the pip index having a bad day. pymupdf is the one wheel here big enough to notice.
       timeout-minutes: 20

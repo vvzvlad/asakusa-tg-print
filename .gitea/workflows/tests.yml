@@ -2,7 +2,7 @@ name: Tests
 
 # PR gate. This workflow deliberately never logs in to the registry and never pushes, and not one
 # `secrets` expression appears anywhere in this file — the word shows up only in prose like this
-# line, never as a value, so there is nothing here for a leak to leak. It runs the same 148 tests
+# line, never as a value, so there is nothing here for a leak to leak. It runs the same 155 tests
 # as image-check-publish.yml, builds the same image, and runs the same ci/smoke.py against it —
 # while :latest, the tag production follows, stays untouched by PR branches.
 #
@@ -62,7 +62,7 @@ jobs:
 
     - name: Run the test suite in a container
       # 20 minutes is far above the real cost: `pip install` of seven pinned runtime wheels plus
-      # pytest/respx, then 148 tests that touch no network, no disk outside tmp_path and no
+      # pytest/respx, then 155 tests that touch no network, no disk outside tmp_path and no
       # subprocess — well under two minutes cold. The bound is for a shared runner under load and
       # for the pip index having a bad day. pymupdf is the one wheel here big enough to notice.
       timeout-minutes: 20

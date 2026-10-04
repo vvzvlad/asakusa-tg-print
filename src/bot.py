@@ -86,8 +86,16 @@ class PrintBot:
         # Previews awaiting confirmation: token -> {"pdf", "text"} (transient, in-memory)
         self._pending: dict[int, dict] = {}
         self._tokens = count(1)
+        # Allowed chats that Telegram migrated to a supergroup: old id -> new id
+        # (loaded from storage in start(), extended by _on_chat_migrated)
+        self._migrated_chats: dict[int, int] = {}
 
         router = Router()
+        # Service messages about a group -> supergroup migration carry no text, so
+        # no Command filter below can match them.
+        router.message.register(
+            self._on_chat_migrated, F.migrate_to_chat_id | F.migrate_from_chat_id
+        )
         router.message.register(self._cmd_start, Command("start"))
         router.message.register(self._cmd_print, Command("print"))
         router.message.register(self._cmd_printglaze, Command("printglaze"))
@@ -98,6 +106,7 @@ class PrintBot:
         self.dp.include_router(router)
 
     async def start(self) -> None:
+        self._migrated_chats = await self.storage.get_chat_migrations()
         await self.bot.set_my_commands([
             BotCommand(command="print", description="Напечатать этикетку (с подтверждением)"),
             BotCommand(command="printglaze", description="Этикетка глазури из Grist (с подтверждением)"),
@@ -109,9 +118,35 @@ class PrintBot:
 
     # ── auth ──────────────────────────────────────────────────────
 
-    @staticmethod
-    def _authorized(user_id: int, chat_id: int) -> bool:
-        return user_id in settings.allowed_ids or chat_id in settings.allowed_chats
+    def _authorized(self, user_id: int, chat_id: int) -> bool:
+        # A persisted migration grants the new id only while the old one is still
+        # allowed in the env: removing that id from ALLOWED_CHAT_IDS revokes the
+        # migrated chat too, so the env stays the single place access is managed.
+        return (
+            user_id in settings.allowed_ids
+            or chat_id in settings.allowed_chats
+            or any(
+                new == chat_id and old in settings.allowed_chats
+                for old, new in self._migrated_chats.items()
+            )
+        )
+
+    # ── chat migration ────────────────────────────────────────────
+
+    async def _on_chat_migrated(self, message: Message) -> None:
+        # Telegram sends a pair of service messages: `migrate_to_chat_id` in the old
+        # group and `migrate_from_chat_id` in the new supergroup. Either one is enough
+        # to learn the mapping; getting both just repeats the same upsert.
+        try:
+            old = message.migrate_from_chat_id or message.chat.id
+            new = message.migrate_to_chat_id or message.chat.id
+            if old == new or old not in settings.allowed_chats:
+                return
+            self._migrated_chats[old] = new
+            await self.storage.add_chat_migration(old, new)
+            logger.info("Chat migrated: {} -> {}; allowed chats updated", old, new)
+        except Exception as e:
+            logger.warning("Error in chat migration handler: {}", e)
 
     # ── rendering ─────────────────────────────────────────────────
 
