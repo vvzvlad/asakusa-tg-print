@@ -179,6 +179,23 @@ async def test_created_at_is_positive_int(storage):
     assert created >= before
 
 
+# ── chat migrations (group -> supergroup) ────────────────────────────────────
+
+async def test_add_and_get_chat_migration_roundtrips(storage):
+    assert await storage.get_chat_migrations() == {}
+    await storage.add_chat_migration(-222, -1000000000222)
+    assert await storage.get_chat_migrations() == {-222: -1000000000222}
+
+
+async def test_add_chat_migration_same_old_id_keeps_one_row_with_latest_new_id(storage):
+    # old_id is the primary key: a repeated migration replaces the row, not appends.
+    await storage.add_chat_migration(-222, -1000000000001)
+    await storage.add_chat_migration(-222, -1000000000002)
+    assert await storage.get_chat_migrations() == {-222: -1000000000002}
+    cur = await storage.db.execute("SELECT COUNT(*) FROM chat_migrations")
+    assert (await cur.fetchone())[0] == 1
+
+
 # ── close() on an un-init()'d Storage ────────────────────────────────────────
 
 async def test_close_without_init_is_noop():

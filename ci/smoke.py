@@ -41,7 +41,7 @@ pinned wheels in requirements.txt, which is exactly the point of running it in t
 
 What this gate can be, and what it cannot
 -----------------------------------------
-There IS a test suite in this repo — twelve pytest modules, 148 tests — and it runs in its own job
+There IS a test suite in this repo — twelve pytest modules, 155 tests — and it runs in its own job
 before the image is built. That makes this gate's job narrower and sharper than "does the code
 work": the tests already answer that, in a checkout, against source files, with every
 collaborator mocked. What they cannot answer is whether the ARTEFACT that gets deployed carries
@@ -75,7 +75,7 @@ shipping broken while the whole suite stays green:
   Probe.
 * (e) the code inside the image is importable and constructible: every `src/*` module, the
   third-party symbols it actually calls, a REAL pymupdf rasterisation, `Storage.init()` twice,
-  and a fully constructed `PrintBot` with its seven handlers registered. Probe.
+  and a fully constructed `PrintBot` with its eight handlers registered. Probe.
 * (f) the image's real CMD starts and gets through its own startup. Outer half — it needs
   `docker run` with the image's own command, `docker logs`, and `docker cp`.
 * (g) the container the probe ran in is still alive afterwards. Outer half.
@@ -392,14 +392,15 @@ TEMPLATE_PATHS = [
     "/app/templates/label_template_glaze.json",
 ]
 
-# The handler set src/bot.py registers on its router: four commands (/start, /print, /printglaze,
-# /sudoprint) and three callback prefixes (print:, cancel:, reprint:). Counted from the real
-# aiogram structures rather than by reading the source, so a decorator that silently stopped
-# registering — a filter that raises during registration, a router that never gets included —
-# shows up here. Per event type rather than as one total, so a drift says WHICH half moved.
+# The handler set src/bot.py registers on its router: one service-message handler for a group ->
+# supergroup migration, four commands (/start, /print, /printglaze, /sudoprint) and three
+# callback prefixes (print:, cancel:, reprint:). Counted from the real aiogram structures rather
+# than by reading the source, so a decorator that silently stopped registering — a filter that
+# raises during registration, a router that never gets included — shows up here. Per event type
+# rather than as one total, so a drift says WHICH half moved.
 # This is an exact match, not a lower bound: adding a handler is supposed to fail this check
 # once, loudly, and be answered by updating this constant.
-EXPECTED_HANDLERS = {"message": 4, "callback_query": 3}
+EXPECTED_HANDLERS = {"message": 5, "callback_query": 3}
 
 # The distinctive half of the error src/printer.py raises when the CUPS client is missing:
 #     raise PrinterError("`lp` not found — install the cups-client package")
@@ -502,7 +503,7 @@ def count_handlers(dispatcher):
     Walks the ROUTERS the dispatcher includes and counts each observer's `handlers` list. The
     Dispatcher's own observers are deliberately excluded: aiogram registers one built-in handler
     on the dispatcher's `update` observer in its constructor, so counting from the dispatcher
-    itself yields eight where seven were registered, and the extra one belongs to the framework
+    itself yields nine where eight were registered, and the extra one belongs to the framework
     rather than to this repo.
     """
     routers = []
@@ -758,7 +759,7 @@ async def check_bot_construction():
 
     The most valuable check in this file, and the one that repays explaining. `PrintBot.__init__`
     touches no network at all — it builds a `Bot` and a `Dispatcher`, constructs the two
-    LabelMakers, the Grist client and the Printer, and registers seven handlers — but it does a
+    LabelMakers, the Grist client and the Printer, and registers eight handlers — but it does a
     great deal of work that only succeeds if the image is right: the token has to satisfy
     aiogram's format check, the eager LabelMaker has to READ the text template off disk through
     its relative path, the lazy one has to be constructible without reading anything, and every
@@ -815,11 +816,12 @@ async def check_bot_construction():
         counts = count_handlers(bot.dp)
         if counts != EXPECTED_HANDLERS:
             record(handlers_target, (
-                "the dispatcher holds {!r} instead. Four commands (/start, /print, /printglaze, "
-                "/sudoprint) and three callback prefixes (print:, cancel:, reprint:) are supposed "
-                "to be registered; a mismatch means either a handler stopped being registered — "
-                "in which case that command silently does nothing in the chat — or one was added "
-                "and this constant needs updating".format(counts)))
+                "the dispatcher holds {!r} instead. One chat-migration service-message handler, "
+                "four commands (/start, /print, /printglaze, /sudoprint) and three callback "
+                "prefixes (print:, cancel:, reprint:) are supposed to be registered; a mismatch "
+                "means either a handler stopped being registered — in which case that command "
+                "silently does nothing in the chat — or one was added and this constant needs "
+                "updating".format(counts)))
         else:
             record(handlers_target, None)
 
@@ -1320,7 +1322,8 @@ def check_real_command(image, name):
     STARTUP_MARKER, builds `Storage` and awaits `init()`, constructs `PrintBot` (which reads the
     text template off disk), and calls `bot.start()`.
 
-    `PrintBot.start()` opens with `await self.bot.set_my_commands([...])` — a REQUEST to Telegram
+    `PrintBot.start()` first loads the persisted chat migrations from storage, then awaits
+    `self.bot.set_my_commands([...])` — a REQUEST to Telegram
     — and only logs "Starting polling" after it returns. So that second marker is unreachable
     here by construction, and a gate that waited for it would be red on every single run while
     looking like it was testing something. It is named in this comment precisely so nobody adds

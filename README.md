@@ -52,7 +52,9 @@ required ones are:
 | `GLAZE_SITE_URL` | Public glaze site URL printed into labels |
 
 Authorization: `ALLOWED_USER_IDS` / `ALLOWED_CHAT_IDS` (comma-separated). Empty =
-nobody can print. A trusted chat means everyone in it may print.
+nobody can print. A trusted chat means everyone in it may print. If Telegram migrates
+a trusted group to a supergroup (its chat id changes), the bot records the mapping in
+its database and keeps printing working without a config change.
 
 ## Deploy
 

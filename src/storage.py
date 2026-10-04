@@ -9,7 +9,9 @@ class Storage:
     """SQLite store of printed labels, so any label can be reprinted later.
 
     Only the label text is kept (not the PDF) — reprinting re-renders it from
-    the current template, which is deterministic.
+    the current template, which is deterministic. The store also keeps the
+    chat_migrations table (old chat id -> new chat id), so a group that Telegram
+    migrated to a supergroup stays allowed across restarts.
     """
 
     def __init__(self, path: str) -> None:
@@ -45,6 +47,17 @@ class Storage:
             await self.db.execute(
                 "ALTER TABLE labels ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'"
             )
+        # Group -> supergroup migrations seen by the bot (old chat id -> new chat id),
+        # so a migrated allowed chat stays allowed across restarts.
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_migrations (
+                old_id     INTEGER PRIMARY KEY,
+                new_id     INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
         await self.db.commit()
         logger.info("Label store ready at {}", self.path)
 
@@ -65,6 +78,18 @@ class Storage:
         cur = await self.db.execute("SELECT * FROM labels WHERE id = ?", (label_id,))
         row = await cur.fetchone()
         return dict(row) if row else None
+
+    async def add_chat_migration(self, old_id: int, new_id: int) -> None:
+        await self.db.execute(
+            "INSERT OR REPLACE INTO chat_migrations (old_id, new_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (old_id, new_id, int(time.time())),
+        )
+        await self.db.commit()
+
+    async def get_chat_migrations(self) -> dict[int, int]:
+        cur = await self.db.execute("SELECT old_id, new_id FROM chat_migrations")
+        return {row["old_id"]: row["new_id"] for row in await cur.fetchall()}
 
     async def close(self) -> None:
         if self.db is not None:

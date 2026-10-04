@@ -20,7 +20,7 @@ python main.py
 pip install -r requirements.txt          # a .venv/ exists in the repo
 pip install -r requirements-dev.txt      # + pytest/respx, for the test suite below
 
-# Tests — 12 modules, 148 tests. tests/conftest.py injects the required settings, so
+# Tests — 12 modules, 155 tests. tests/conftest.py injects the required settings, so
 # this needs no environment of its own. CI runs exactly this, in a python:3.12-slim
 # container, and the image build depends on it.
 pytest
@@ -48,10 +48,10 @@ Entry point `main.py` opens the SQLite store, constructs `PrintBot` (`src/bot.py
 - **`/printglaze <name>`**: `GristClient.find_glaze()` looks up the row in the `Glazes` table by `GeneralName` (exact case-insensitive, else substring), resolves the `Maker` reference into a `Makerlink` from the `GlazeMakers` table, then `glaze_entities()` (`src/grist.py`) maps the row's fields into the template's `%E1%..%E8%` placeholders. Rendered with the glaze template, then the standard preview/confirm/print flow.
 
 ### Reprint persistence (`src/storage.py`)
-The SQLite `labels` table stores only `(text, chat_id, user_id, kind, created_at)` — **never the PDF**. Reprint re-renders from scratch (rendering is deterministic). `kind` is `"text"` or `"glaze"`; on reprint a `glaze` row **re-queries Grist** by its stored name, so glaze reprints reflect current Grist data, not a snapshot. `init()` self-migrates older DBs that lack the `kind` column.
+The SQLite `labels` table stores only `(text, chat_id, user_id, kind, created_at)` — **never the PDF**. Reprint re-renders from scratch (rendering is deterministic). `kind` is `"text"` or `"glaze"`; on reprint a `glaze` row **re-queries Grist** by its stored name, so glaze reprints reflect current Grist data, not a snapshot. `init()` self-migrates older DBs that lack the `kind` column. The same database also keeps the `chat_migrations` table (old chat id → new chat id), which `_authorized` consults for migrated groups.
 
 ### Authorization
-`_authorized(user_id, chat_id)` = `user_id ∈ ALLOWED_USER_IDS` **OR** `chat_id ∈ ALLOWED_CHAT_IDS`. A trusted chat means **everyone in it may print** (including reprinting others' labels) — this is intentional. Empty lists = nobody can print. Every command and the print/reprint callbacks check this. For callbacks on messages older than 48h (`InaccessibleMessage`, where the chat context is unavailable) `_cb_authorized` falls back to the per-user allowlist only.
+`_authorized(user_id, chat_id)` = `user_id ∈ ALLOWED_USER_IDS` **OR** `chat_id ∈ ALLOWED_CHAT_IDS` **OR** `chat_id` is the target of a persisted group→supergroup migration of an allowed chat (the `_on_chat_migrated` handler records the pair in `chat_migrations`; the pair only helps while the old id is still in `ALLOWED_CHAT_IDS`, so removing it revokes the migrated chat too). A trusted chat means **everyone in it may print** (including reprinting others' labels) — this is intentional. Empty lists = nobody can print. Every command and the print/reprint callbacks check this. For callbacks on messages older than 48h (`InaccessibleMessage`, where the chat context is unavailable) `_cb_authorized` falls back to the per-user allowlist only.
 
 ## Key constraints & gotchas
 
