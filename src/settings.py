@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str
-    telegram_api_server: str | None = None
+    telegram_bot_api_server: str | None = None
     # Comma-separated Telegram user IDs allowed to print; empty = nobody (deny all)
     allowed_user_ids: str = ""
     # Comma-separated Telegram chat IDs (groups) where everyone may print

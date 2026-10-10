@@ -63,4 +63,4 @@ The SQLite `labels` table stores only `(text, chat_id, user_id, kind, created_at
 
 ## Configuration
 
-All config is env vars loaded by `src/settings.py` (`Settings`, pydantic-settings, reads `.env`); see `.env.example` for the full set. Notable groups: Telegram (`TELEGRAM_BOT_TOKEN`, optional self-hosted `TELEGRAM_API_SERVER`), auth (`ALLOWED_USER_IDS`/`ALLOWED_CHAT_IDS`, comma-separated, chat IDs are negative), Label Maker (`LABEL_MAKER_URL`), CUPS (`CUPS_HOST`, `PRINTER_NAME`, `PRINTER_MEDIA`, `LABEL_ROTATE`), and Grist (`GRIST_BASE_URL`, `GRIST_DOC_ID`, `GRIST_API_KEY`, `GLAZE_SITE_URL`). Code comments must be in English.
+All config is env vars loaded by `src/settings.py` (`Settings`, pydantic-settings, reads `.env`); see `.env.example` for the full set. Notable groups: Telegram (`TELEGRAM_BOT_TOKEN`, optional self-hosted `TELEGRAM_BOT_API_SERVER`), auth (`ALLOWED_USER_IDS`/`ALLOWED_CHAT_IDS`, comma-separated, chat IDs are negative), Label Maker (`LABEL_MAKER_URL`), CUPS (`CUPS_HOST`, `PRINTER_NAME`, `PRINTER_MEDIA`, `LABEL_ROTATE`), and Grist (`GRIST_BASE_URL`, `GRIST_DOC_ID`, `GRIST_API_KEY`, `GLAZE_SITE_URL`). Code comments must be in English.
