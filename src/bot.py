@@ -68,9 +68,9 @@ class PrintBot:
         self.storage = storage
 
         # Use a self-hosted Bot API server instead of api.telegram.org when set
-        if settings.telegram_api_server:
+        if settings.telegram_bot_api_server:
             session = AiohttpSession(
-                api=TelegramAPIServer.from_base(settings.telegram_api_server)
+                api=TelegramAPIServer.from_base(settings.telegram_bot_api_server)
             )
             self.bot = Bot(token=settings.telegram_bot_token, session=session)
         else:

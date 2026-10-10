@@ -178,7 +178,7 @@ REQUIRED_FIELDS = [
 #     involving DNS: a hostname would put the runner's resolver in the loop, and a resolver that
 #     answers everything (a captive portal, a hijacking upstream) would turn an instant refusal
 #     into a minute of connect timeout;
-#   * TELEGRAM_API_SERVER points at 127.0.0.1:9 for the same reason, and it is set rather than
+#   * TELEGRAM_BOT_API_SERVER points at 127.0.0.1:9 for the same reason, and it is set rather than
 #     left out on purpose. Production sets it, so setting it here makes `PrintBot.__init__` take
 #     the branch production actually runs — the one that builds an `AiohttpSession` around a
 #     custom `TelegramAPIServer` — instead of the api.telegram.org default that no deployment
@@ -186,7 +186,7 @@ REQUIRED_FIELDS = [
 #     it, so the connection is refused the moment it is attempted.
 SMOKE_ENV = [
     "TELEGRAM_BOT_TOKEN=123456789:AAFakeSmokeTokenNotReal_0123456789abc",
-    "TELEGRAM_API_SERVER=http://127.0.0.1:9",
+    "TELEGRAM_BOT_API_SERVER=http://127.0.0.1:9",
     "LABEL_MAKER_URL=http://label-maker.test",
     "GRIST_BASE_URL=https://grist.test",
     "GRIST_DOC_ID=smoke-doc",

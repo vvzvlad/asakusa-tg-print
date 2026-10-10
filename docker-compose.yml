@@ -50,7 +50,7 @@ services:
     environment:
       # ── Telegram ──────────────────────────────────────────────────────────────
       TELEGRAM_BOT_TOKEN: XXX
-      TELEGRAM_API_SERVER: XXX            # base URL of the self-hosted Bot API server
+      TELEGRAM_BOT_API_SERVER: XXX        # base URL of the self-hosted Bot API server
       # Comma-separated chat IDs (negative for groups) whose members may print.
       # ALLOWED_USER_IDS is deliberately NOT set: access is granted by chat membership alone, so
       # adding somebody to the group is the whole of the access control. Setting it here would
