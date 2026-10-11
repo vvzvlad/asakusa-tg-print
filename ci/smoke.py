@@ -371,8 +371,10 @@ THIRD_PARTY_SYMBOLS = [
         "BotCommand", "BufferedInputFile", "CallbackQuery",
         "InlineKeyboardButton", "InlineKeyboardMarkup", "Message",
     ]),
-    # src/label_maker.py and src/grist.py both build an AsyncClient and catch HTTPError.
+    # src/label_maker.py builds an AsyncClient and catches HTTPError.
     ("httpx", ["AsyncClient", "HTTPError"]),
+    # src/grist.py wraps the shared sync client and re-exports its error.
+    ("grist_client", ["GristClient", "GristError"]),
     # src/storage.py: connect() and the Row factory, plus the Connection it annotates with.
     ("aiosqlite", ["connect", "Row", "Connection"]),
     # Every module logs through the singleton.

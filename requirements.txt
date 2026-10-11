@@ -5,3 +5,4 @@ python-dotenv==1.0.1
 loguru==0.7.2
 httpx==0.28.1
 pymupdf==1.27.2.3
+grist-client @ https://gitea.vvzvlad.xyz/api/packages/projects/pypi/files/grist-client/0.1.0/grist_client-0.1.0-py3-none-any.whl

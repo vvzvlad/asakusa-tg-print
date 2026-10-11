@@ -1,14 +1,13 @@
-import httpx
+import asyncio
+
+import grist_client
+from grist_client import GristError
 from loguru import logger
 
 from src.settings import settings
 
 GLAZE_TABLE = "Glazes"
 MAKERS_TABLE = "GlazeMakers"
-
-
-class GristError(Exception):
-    """Raised when the Grist API request fails."""
 
 
 class GristClient:
@@ -19,27 +18,21 @@ class GristClient:
     """
 
     def __init__(self) -> None:
-        self.base_url = settings.grist_base_url.rstrip("/")
-        self.doc_id = settings.grist_doc_id
         self.api_key = settings.grist_api_key
-        self.timeout = settings.label_maker_timeout
+        self._client = grist_client.GristClient(
+            settings.grist_base_url, settings.grist_doc_id, settings.grist_api_key
+        )
 
     async def _records(self, table: str) -> list[dict]:
         if not self.api_key:
             raise GristError("GRIST_API_KEY is not configured")
-        url = f"{self.base_url}/api/docs/{self.doc_id}/tables/{table}/records"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(url, headers=headers)
-        except httpx.HTTPError as e:
-            raise GristError(f"Grist unreachable: {e}") from e
-        if resp.status_code != 200:
-            raise GristError(f"Grist returned {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        if "records" not in data:
-            raise GristError(f"Unexpected Grist response: {str(data)[:200]}")
-        return data["records"]
+        # The shared client is synchronous; a worker thread keeps it off the event loop.
+        rows = await asyncio.to_thread(self._client.fetch_table, table)
+        records = []
+        for row in rows:
+            fields = row._asdict()
+            records.append({"id": fields.pop("id"), "fields": fields})
+        return records
 
     async def find_glaze(self, query: str) -> dict | None:
         """Find the first Glazes row whose GeneralName matches `query`.
