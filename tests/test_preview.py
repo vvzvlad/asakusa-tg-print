@@ -3,8 +3,7 @@
 Covers the synchronous `_render` worker and the async `pdf_to_png` wrapper
 that delegates to it via `asyncio.to_thread`. The `pdf_bytes` fixture (a real
 one-page PDF) is used for the happy paths; deliberately malformed bytes drive
-the error paths. Per the test-strategy report, DPI-range validation is NOT
-tested (no such feature exists in the code).
+the error paths.
 """
 
 import pytest

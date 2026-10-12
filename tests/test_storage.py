@@ -48,10 +48,8 @@ async def test_init_is_idempotent():
 
 
 async def test_init_twice_does_not_open_a_second_connection():
-    # Regression guard: init() used to reconnect unconditionally, overwriting and
-    # leaking the previous connection (a non-daemon aiosqlite thread that hangs
-    # interpreter/pytest shutdown). A second init() must reuse the same handle,
-    # and close() must drop it.
+    # A second init() must reuse the open handle (a leaked aiosqlite connection is a
+    # non-daemon thread that hangs shutdown), and close() must drop it.
     s = Storage(":memory:")
     await s.init()
     first = s.db
