@@ -1,10 +1,9 @@
 """Shared pytest fixtures and factories for the asakusa-tg-print test suite.
 
-IMPORTANT ordering note: a dummy TELEGRAM_BOT_TOKEN is injected into the
+Ordering: dummy values for the required settings are injected into the
 environment *before* any `src.*` module is imported, because importing
-`src.settings` constructs `Settings()` at module load and the token field is
-required (no default). os.environ takes priority over the real `.env` in
-pydantic-settings, so the suite is hermetic regardless of a developer's .env.
+`src.settings` constructs `Settings()` at module load. os.environ takes priority
+over `.env` in pydantic-settings, so the suite ignores a developer's .env.
 
 Fixtures provided to test modules
 ---------------------------------

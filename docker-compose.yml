@@ -1,39 +1,20 @@
-# Deploy template. Production does not build this service — it pulls the prebuilt image that
-# .gitea/workflows/image-check-publish.yml publishes, and it follows the `:latest` tag.
+# Deploy template. Production pulls the image published by
+# .gitea/workflows/image-check-publish.yml and follows `:latest`; Portainer's image updater
+# (the `io.portainer.update.enable` label below) redeploys when the digest behind it moves. There
+# is no watchtower and its label must not be added.
 #
-# Updates are driven by Portainer's own image updater, which is what the
-# `io.portainer.update.enable` label at the bottom of this file turns on: it polls the tag above
-# and redeploys when the digest behind it moves. There is NO watchtower here — an earlier version
-# of this file said there was, and it was never true of the running stack (which carries no
-# watchtower label at all). The watchtower label has since been dropped from the fleet convention
-# entirely, so it is not merely absent here, it must not be re-added.
+# A long-polling Telegram bot with no listening socket: no Traefik labels, no `ports:`, no
+# `healthcheck:`. It joins the shared network only to reach the label-rendering service and the
+# CUPS host.
 #
-# That polling loop is also why the smoke gate in CI sits between `docker build` and
-# `docker push`: nothing between the registry and this container asks a human anything, so an
-# image that reaches `:latest` is an image that is already on its way into production.
-#
-# This is a long-polling Telegram bot. It opens no listening socket, so there is nothing to route
-# and nothing to health-check over HTTP — no Traefik labels, no `ports:`, no `healthcheck:`. It
-# joins the shared network only to reach outwards: the label-rendering service that turns a
-# template into a PDF, and the CUPS host the PDF is printed on.
-#
-# Every value below is a PLACEHOLDER (XXX) or a non-secret default. Real tokens, addresses and
-# document ids live only in the deployment's own environment and are never committed here.
-#
-# Noticed while writing this: the running stack also sets TEMPLATE_PATH, and it does nothing at
-# all. `src/settings.py` declares no such field, and `extra="ignore"` means pydantic drops it
-# without complaint; `src/label_maker.py` reads its template paths from module-level constants
-# instead. It is deliberately NOT reproduced here — carrying it forward would keep suggesting the
-# template location is configurable when it is not — but it is worth removing from the deployment
-# too, so nobody edits it expecting an effect.
+# Every value below is a placeholder (XXX) or a non-secret default; real tokens, addresses and
+# document ids live only in the deployment's environment. TEMPLATE_PATH is not a setting:
+# src/label_maker.py reads its template paths from module-level constants.
 
 volumes:
-  # The SQLite store of printed labels. It is what makes the «🔁 Перепечатать» button work on old
-  # messages, so losing it is not cosmetic: every previously printed label becomes unreprintable.
-  # The name matters and must not be "tidied": docker composes it with the stack name to form the
-  # real volume, so renaming this key points the service at a NEW, EMPTY volume while the old one
-  # sits there full of history and unreferenced. An earlier version of this file named it
-  # `asakusa_tg_print`, which is not the volume production actually carries.
+  # The SQLite store of printed labels, needed by the «🔁 Перепечатать» button on old messages.
+  # Do not rename the key: docker prefixes it with the stack name, so a new name points the
+  # service at a new, empty volume.
   tgprint:
 
 networks:
